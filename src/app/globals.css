@@ -110,3 +110,13 @@ body {
   background-clip: text;
   color: transparent;
 }
+
+.kb-input {
+  width: 100%;
+  border-radius: 1rem;
+  background: white;
+  padding: 0.75rem 1rem;
+  font-size: 14px;
+  color: var(--kb-ink);
+  outline: none;
+}

@@ -31,8 +31,8 @@ const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
  * is Feature #002. Cook accept/reject + PayNow is #006, rider workflow is
  * #008 — this screen just proves the navigation and layout out.
  */
-export function PartnerShell() {
-  const [view, setView] = useState<"cook" | "rider">("cook");
+export function PartnerShell({ defaultView = "cook" }: { defaultView?: "cook" | "rider" }) {
+  const [view, setView] = useState<"cook" | "rider">(defaultView);
 
   return (
     <div className="min-h-screen pb-24" style={{ background: "var(--kb-navy)" }}>
