@@ -11,15 +11,25 @@ npm run dev   # http://localhost:3000
 npm run build
 ```
 
-## Current status: Feature #001-equivalent — Foundation + shell
+## Current status: Feature #003 — Auth + roles done, cook kitchen/menu setup done
 
 - Design system shared with Customer/HQ (`src/app/globals.css`)
-- Cook view: order list with PENDING/ACCEPTED/PREPARING/READY/COMPLETED
-  states, Accept/Reject action on pending orders (not yet wired to a
-  backend)
-- Rider view: delivery list with pickup/dropoff/fee
-- View toggle is a **demo stand-in** for real role-based routing — real
-  auth + role assignment is Feature #002
+- **Real auth**: phone OTP (Vonage) + Google Sign-In, `/login`
+- **Real application flow**: `/` gates on Supabase — sign in → apply
+  (cook or rider) → pending/rejected status screen → once HQ approves,
+  cooks are routed into kitchen setup, riders straight into the shell
+- **Real kitchen/menu setup** (`src/components/KitchenSetupForm.tsx`,
+  `/kitchen`): mandatory business info + category + cuisine + at least one
+  menu item with a price (photo optional); saving flips `kitchens.is_live`
+  and the kitchen appears immediately in the Customer app. See
+  `docs/feature-003.md`.
+- Order list / delivery list inside `PartnerShell` are still
+  PENDING/ACCEPTED/PREPARING/READY/COMPLETED **demo data** — real orders are
+  Feature #005/#006, real rider dispatch is #008
+- View toggle in `PartnerShell` is still a demo stand-in for switching
+  between cook/rider views — not real role-based routing (that part is
+  fine since role is now enforced server-side in `page.tsx` before the
+  shell ever renders)
 
-Demo data only — `src/lib/demo-data.ts`. No backend, no PayNow flow yet
-(that's Feature #006), no real rider dispatch (Feature #008).
+`src/lib/demo-data.ts` — orders/deliveries only now, not applications or
+kitchens (those are real). No PayNow flow yet (#006).

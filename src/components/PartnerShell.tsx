@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { TopBar } from "./TopBar";
 import { BottomNav } from "./BottomNav";
 import { DEMO_ORDERS, DEMO_DELIVERIES } from "@/lib/demo-data";
@@ -68,9 +69,14 @@ export function PartnerShell({ defaultView = "cook" }: { defaultView?: "cook" | 
       <main className="mx-auto max-w-md space-y-3 px-4 py-6 sm:max-w-lg sm:px-6">
         {view === "cook" ? (
           <>
-            <h2 className="font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
-              Orders
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
+                Orders
+              </h2>
+              <Link href="/kitchen" className="text-sm font-semibold" style={{ color: "var(--kb-green)" }}>
+                Manage kitchen &amp; menu &rsaquo;
+              </Link>
+            </div>
             {DEMO_ORDERS.map((o) => (
               <div key={o.id} className="rounded-2xl bg-white p-4 shadow-lg" style={{ color: "var(--kb-ink)" }}>
                 <div className="flex items-center justify-between">

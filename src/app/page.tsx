@@ -3,7 +3,9 @@ import { LoginForm } from "@/components/LoginForm";
 import { ApplyForm } from "@/components/ApplyForm";
 import { StatusScreen } from "@/components/StatusScreen";
 import { PartnerShell } from "@/components/PartnerShell";
+import { KitchenSetupForm } from "@/components/KitchenSetupForm";
 import type { Profile, CookApplication, RiderApplication } from "@/lib/types-auth";
+import type { Kitchen } from "@/lib/types-kitchen";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -32,6 +34,39 @@ export default async function Home() {
         />
       );
     }
+
+    // Cooks must set up their kitchen (mandatory menu + at least one price)
+    // before they appear in the Customer app — Feature #003.
+    if (profile.role === "cook") {
+      const { data: kitchen } = await supabase
+        .from("kitchens")
+        .select("*")
+        .eq("id", user.id)
+        .maybeSingle<Kitchen>();
+
+      if (!kitchen) {
+        const { data: application } = await supabase
+          .from("cook_applications")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("status", "approved")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle<CookApplication>();
+
+        return (
+          <KitchenSetupForm
+            userId={user.id}
+            defaults={{
+              business_name: application?.business_name ?? "",
+              neighbourhood: application?.neighbourhood ?? "",
+              description: application?.description ?? "",
+            }}
+          />
+        );
+      }
+    }
+
     return <PartnerShell defaultView={profile.role} />;
   }
 

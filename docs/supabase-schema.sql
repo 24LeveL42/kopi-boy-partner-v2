@@ -156,3 +156,94 @@ $$ language plpgsql security definer set search_path = public;
 create trigger before_profile_update
   before update on public.profiles
   for each row execute function public.protect_profile_privileges();
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Feature #003: Merchant Onboarding (Kitchen + Menu)
+-- Run this ONCE, after the Feature #002 script above, in the same Supabase
+-- project's SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 6. KITCHENS
+-- One row per approved cook — the merchant-facing profile shown in the
+-- Customer app marketplace. Created/edited by the cook themselves via the
+-- Partner app's kitchen setup screen, not by HQ. id = the cook's own
+-- profiles.id (one kitchen per cook).
+-- ----------------------------------------------------------------------------
+create table public.kitchens (
+  id uuid primary key references public.profiles(id) on delete cascade,
+  business_name text not null,
+  category text not null check (category in ('home-cook', 'hawker', 'bakery', 'bulk-orders', 'drinks')),
+  cuisine_type text not null check (cuisine_type in ('chinese', 'halal', 'indian', 'western')),
+  neighbourhood text not null,
+  description text,
+  hero_image text, -- optional per the handover doc ("a food photo is optional"); Customer app falls back to a category image when null
+  is_live boolean not null default false, -- flips true once the cook has saved at least one menu item (enforced in app logic, not here)
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.kitchens enable row level security;
+
+create policy "Cooks can read their own kitchen"
+  on public.kitchens for select
+  using (auth.uid() = id);
+
+create policy "Cooks can insert their own kitchen"
+  on public.kitchens for insert
+  with check (auth.uid() = id and exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'cook'));
+
+create policy "Cooks can update their own kitchen"
+  on public.kitchens for update
+  using (auth.uid() = id);
+
+create policy "Anyone can read live kitchens"
+  on public.kitchens for select
+  using (is_live = true);
+
+create policy "Admins can read every kitchen"
+  on public.kitchens for select
+  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+
+-- ----------------------------------------------------------------------------
+-- 7. MENU ITEMS
+-- Section: "menu items and price tags are mandatory; a food photo is
+-- optional." One row per dish. The Partner app replaces all of a kitchen's
+-- rows on every save (see KitchenSetupForm) rather than diffing — simplest
+-- correct approach for this feature's scope.
+-- ----------------------------------------------------------------------------
+create table public.menu_items (
+  id uuid primary key default gen_random_uuid(),
+  kitchen_id uuid not null references public.kitchens(id) on delete cascade,
+  name text not null,
+  price numeric(6,2) not null check (price > 0),
+  photo_url text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.menu_items enable row level security;
+
+create policy "Cooks can manage their own menu items"
+  on public.menu_items for all
+  using (auth.uid() = kitchen_id)
+  with check (auth.uid() = kitchen_id);
+
+create policy "Anyone can read menu items of a live kitchen"
+  on public.menu_items for select
+  using (exists (select 1 from public.kitchens k where k.id = menu_items.kitchen_id and k.is_live = true));
+
+-- ----------------------------------------------------------------------------
+-- 8. KEEP updated_at CURRENT ON KITCHENS
+-- ----------------------------------------------------------------------------
+create function public.touch_kitchen_updated_at()
+returns trigger as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger before_kitchen_update
+  before update on public.kitchens
+  for each row execute function public.touch_kitchen_updated_at();
