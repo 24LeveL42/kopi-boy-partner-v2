@@ -247,3 +247,128 @@ $$ language plpgsql;
 create trigger before_kitchen_update
   before update on public.kitchens
   for each row execute function public.touch_kitchen_updated_at();
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Picker role (optional pickup helper for riders)
+-- Run this ONCE, after the Feature #002 and #003 scripts above, in the same
+-- Supabase project's SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 9. ALLOW 'picker' AS A PROFILE ROLE
+-- Postgres won't let you edit a check constraint in place, so it's
+-- drop-and-recreate. If this fails because your constraint has a different
+-- auto-generated name, find it first with:
+--   select conname from pg_constraint where conrelid = 'public.profiles'::regclass and contype = 'c';
+-- ----------------------------------------------------------------------------
+alter table public.profiles drop constraint profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in ('customer', 'cook', 'rider', 'picker', 'admin'));
+
+-- ----------------------------------------------------------------------------
+-- 10. PICKER APPLICATIONS
+-- Same register -> submit -> review -> approve/reject pattern as cook/rider
+-- applications. Deliberately minimal fields — this role is meant for
+-- students/anyone nearby wanting casual pocket money, not a vetted fleet.
+-- ----------------------------------------------------------------------------
+create table public.picker_applications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  note text, -- optional: why they want to pick up orders, anything relevant
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  reviewed_by uuid references auth.users(id),
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+alter table public.picker_applications enable row level security;
+
+create policy "Applicants can read their own picker application"
+  on public.picker_applications for select
+  using (auth.uid() = user_id);
+
+create policy "Applicants can submit a picker application"
+  on public.picker_applications for insert
+  with check (auth.uid() = user_id);
+
+create policy "Admins can read every picker application"
+  on public.picker_applications for select
+  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+
+create policy "Admins can update every picker application"
+  on public.picker_applications for update
+  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+
+-- ----------------------------------------------------------------------------
+-- 11. PICKUP REQUESTS
+-- The rider-initiated, picker-fulfilled handshake described in the picker
+-- workflow: rider requests a picker for a specific kitchen pickup -> any
+-- approved picker can accept -> picker collects from the cook -> picker
+-- hands off to the rider and marks it complete. Payment (rider pays picker)
+-- happens off-platform, same as every other money leg in Kopi Boy —
+-- suggested_fee is a default the app shows, not an enforced amount.
+--
+-- NOTE: not yet linked to a real orders/deliveries table since #005/#006/#008
+-- haven't shipped. kitchen_id is enough to make the full accept/collect/
+-- handoff loop testable now; link it to a real delivery_id once that table
+-- exists.
+-- ----------------------------------------------------------------------------
+create table public.pickup_requests (
+  id uuid primary key default gen_random_uuid(),
+  rider_id uuid not null references public.profiles(id) on delete cascade,
+  kitchen_id uuid not null references public.kitchens(id) on delete cascade,
+  picker_id uuid references public.profiles(id),
+  status text not null default 'open' check (status in ('open', 'accepted', 'completed', 'cancelled')),
+  suggested_fee numeric(5,2) not null default 2.00,
+  created_at timestamptz not null default now(),
+  accepted_at timestamptz,
+  completed_at timestamptz
+);
+
+alter table public.pickup_requests enable row level security;
+
+create policy "Riders can create their own pickup requests"
+  on public.pickup_requests for insert
+  with check (auth.uid() = rider_id);
+
+create policy "Riders can read their own pickup requests"
+  on public.pickup_requests for select
+  using (auth.uid() = rider_id);
+
+create policy "Riders can cancel their own open pickup requests"
+  on public.pickup_requests for update
+  using (auth.uid() = rider_id and status = 'open')
+  with check (auth.uid() = rider_id and status = 'cancelled');
+
+create policy "Pickers can read open pickup requests"
+  on public.pickup_requests for select
+  using (
+    status = 'open'
+    and exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'picker')
+  );
+
+create policy "Pickers can read their assigned pickup requests"
+  on public.pickup_requests for select
+  using (auth.uid() = picker_id);
+
+create policy "Pickers can accept an open pickup request"
+  on public.pickup_requests for update
+  using (
+    status = 'open'
+    and exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'picker')
+  )
+  with check (picker_id = auth.uid() and status = 'accepted');
+
+create policy "Pickers can complete their assigned pickup request"
+  on public.pickup_requests for update
+  using (auth.uid() = picker_id)
+  with check (auth.uid() = picker_id);
+
+create policy "Admins can read every pickup request"
+  on public.pickup_requests for select
+  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+
+create policy "Admins can update every pickup request"
+  on public.pickup_requests for update
+  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));

@@ -101,9 +101,14 @@ export function PartnerShell({ defaultView = "cook" }: { defaultView?: "cook" | 
           </>
         ) : (
           <>
-            <h2 className="font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
-              Deliveries
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
+                Deliveries
+              </h2>
+              <Link href="/request-picker" className="text-sm font-semibold" style={{ color: "var(--kb-green)" }}>
+                Request a picker &rsaquo;
+              </Link>
+            </div>
             {DEMO_DELIVERIES.map((d) => (
               <div key={d.id} className="rounded-2xl bg-white p-4 shadow-lg" style={{ color: "var(--kb-ink)" }}>
                 <div className="flex items-center justify-between">

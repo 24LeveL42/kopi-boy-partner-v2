@@ -4,7 +4,7 @@
  * Feature #006 (accept/reject + PayNow) and #008 (rider workflow).
  */
 
-export type PartnerRole = "cook" | "rider";
+export type PartnerRole = "cook" | "rider" | "picker";
 
 export type OrderStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "PREPARING" | "READY" | "COMPLETED";
 

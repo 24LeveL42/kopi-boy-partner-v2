@@ -2,7 +2,7 @@ export type ApplicationStatus = "pending" | "approved" | "rejected";
 
 export interface Profile {
   id: string;
-  role: "customer" | "cook" | "rider" | "admin";
+  role: "customer" | "cook" | "rider" | "picker" | "admin";
   full_name: string | null;
   phone: string | null;
   is_active: boolean;
@@ -25,6 +25,14 @@ export interface RiderApplication {
   user_id: string;
   vehicle_type: string | null;
   license_plate: string | null;
+  status: ApplicationStatus;
+  created_at: string;
+}
+
+export interface PickerApplication {
+  id: string;
+  user_id: string;
+  note: string | null;
   status: ApplicationStatus;
   created_at: string;
 }

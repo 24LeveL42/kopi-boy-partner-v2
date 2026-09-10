@@ -24,6 +24,9 @@ export function ApplyForm({ userId }: { userId: string }) {
   const [vehicleType, setVehicleType] = useState("Motorcycle");
   const [licensePlate, setLicensePlate] = useState("");
 
+  // Picker fields
+  const [pickerNote, setPickerNote] = useState("");
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -48,6 +51,16 @@ export function ApplyForm({ userId }: { userId: string }) {
         user_id: userId,
         vehicle_type: vehicleType,
         license_plate: licensePlate,
+      });
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
+    } else if (roleChoice === "picker") {
+      const { error } = await supabase.from("picker_applications").insert({
+        user_id: userId,
+        note: pickerNote || null,
       });
       if (error) {
         setError(error.message);
@@ -87,6 +100,13 @@ export function ApplyForm({ userId }: { userId: string }) {
             <span className="block font-semibold" style={{ color: "var(--kb-ink)" }}>I&apos;m a rider</span>
             <span className="text-sm" style={{ color: "var(--kb-ink-soft)" }}>Free registration, no fees — you keep the full delivery fee</span>
           </button>
+          <button
+            onClick={() => setRoleChoice("picker")}
+            className="w-full rounded-2xl bg-white py-4 text-left px-5"
+          >
+            <span className="block font-semibold" style={{ color: "var(--kb-ink)" }}>I&apos;m a picker</span>
+            <span className="text-sm" style={{ color: "var(--kb-ink-soft)" }}>Casual — collect an order from a cook and hand it to a rider nearby</span>
+          </button>
         </div>
       </div>
     );
@@ -98,10 +118,21 @@ export function ApplyForm({ userId }: { userId: string }) {
         &larr; Back
       </button>
       <h1 className="mt-4 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
-        {roleChoice === "cook" ? "Cook application" : "Rider application"}
+        {roleChoice === "cook" ? "Cook application" : roleChoice === "rider" ? "Rider application" : "Picker application"}
       </h1>
 
       <form onSubmit={handleSubmit} className="mt-5 space-y-3">
+        {roleChoice === "picker" && (
+          <Field label="Anything we should know? (optional)">
+            <textarea
+              value={pickerNote}
+              onChange={(e) => setPickerNote(e.target.value)}
+              className="kb-input"
+              rows={3}
+              placeholder="e.g. usually free after school, near Toa Payoh"
+            />
+          </Field>
+        )}
         {roleChoice === "cook" ? (
           <>
             <Field label="Business name">
@@ -125,7 +156,7 @@ export function ApplyForm({ userId }: { userId: string }) {
               <input value={paynowUen} onChange={(e) => setPaynowUen(e.target.value)} className="kb-input" />
             </Field>
           </>
-        ) : (
+        ) : roleChoice === "rider" ? (
           <>
             <Field label="Vehicle type">
               <select value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} className="kb-input">
@@ -138,7 +169,7 @@ export function ApplyForm({ userId }: { userId: string }) {
               <input value={licensePlate} onChange={(e) => setLicensePlate(e.target.value)} className="kb-input" />
             </Field>
           </>
-        )}
+        ) : null}
 
         <button
           type="submit"
