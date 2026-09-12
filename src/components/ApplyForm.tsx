@@ -13,6 +13,10 @@ export function ApplyForm({ userId }: { userId: string }) {
   const router = useRouter();
   const supabase = createClient();
 
+  // Shared fields
+  const [fullName, setFullName] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
+
   // Cook fields
   const [businessName, setBusinessName] = useState("");
   const [businessType, setBusinessType] = useState("Home Cook");
@@ -31,6 +35,23 @@ export function ApplyForm({ userId }: { userId: string }) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    if (!fullName.trim() || !contactNumber.trim()) {
+      setError("Please fill in your full name and contact number.");
+      setLoading(false);
+      return;
+    }
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ full_name: fullName.trim(), phone: contactNumber.trim() })
+      .eq("id", userId);
+
+    if (profileError) {
+      setError(profileError.message);
+      setLoading(false);
+      return;
+    }
 
     if (roleChoice === "cook") {
       const { error } = await supabase.from("cook_applications").insert({
@@ -122,6 +143,25 @@ export function ApplyForm({ userId }: { userId: string }) {
       </h1>
 
       <form onSubmit={handleSubmit} className="mt-5 space-y-3">
+        <Field label="Full name (as per NRIC)">
+          <input
+            required
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            className="kb-input"
+            placeholder="e.g. Tan Wei Ming"
+          />
+        </Field>
+        <Field label="Contact number">
+          <input
+            required
+            type="tel"
+            value={contactNumber}
+            onChange={(e) => setContactNumber(e.target.value)}
+            className="kb-input"
+            placeholder="e.g. 91234567"
+          />
+        </Field>
         {roleChoice === "picker" && (
           <Field label="Anything we should know? (optional)">
             <textarea
