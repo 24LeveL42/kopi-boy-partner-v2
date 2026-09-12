@@ -1,39 +1,42 @@
 "use client";
 
-import { useState } from "react";
-
-const ITEMS = [
-  { id: "orders", label: "Orders", icon: OrdersIcon },
-  { id: "deliveries", label: "Deliveries", icon: DeliveryIcon },
-  { id: "earnings", label: "Earnings", icon: EarningsIcon },
-  { id: "profile", label: "Profile", icon: ProfileIcon },
-] as const;
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export function BottomNav() {
-  const [active, setActive] = useState<string>("orders");
+  const pathname = usePathname();
 
   return (
     <nav
       className="fixed inset-x-0 bottom-0 z-10 mx-auto flex max-w-md items-stretch justify-between rounded-t-3xl bg-white px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.15)] sm:max-w-lg"
       aria-label="Primary"
     >
-      {ITEMS.map((item) => {
-        const isActive = item.id === active;
-        const Icon = item.icon;
-        return (
-          <button
-            key={item.id}
-            onClick={() => setActive(item.id)}
-            className="flex flex-1 flex-col items-center gap-1 py-1.5"
-            aria-current={isActive ? "page" : undefined}
-            style={{ color: isActive ? "var(--kb-purple)" : "var(--kb-ink-soft)" }}
-          >
-            {isActive && <span className="h-0.5 w-6 rounded-full" style={{ background: "var(--kb-purple)" }} />}
-            <Icon />
-            <span className="text-[11px] font-medium">{item.label}</span>
-          </button>
-        );
-      })}
+      <Link
+        href="/"
+        className="flex flex-1 flex-col items-center gap-1 py-1.5"
+        aria-current={pathname === "/" ? "page" : undefined}
+        style={{ color: pathname === "/" ? "var(--kb-purple)" : "var(--kb-ink-soft)" }}
+      >
+        {pathname === "/" && <span className="h-0.5 w-6 rounded-full" style={{ background: "var(--kb-purple)" }} />}
+        <OrdersIcon />
+        <span className="text-[11px] font-medium">Home</span>
+      </Link>
+
+      <div className="flex flex-1 flex-col items-center gap-1 py-1.5 opacity-40" aria-disabled="true">
+        <EarningsIcon />
+        <span className="text-[11px] font-medium">Earnings (soon)</span>
+      </div>
+
+      <Link
+        href="/account"
+        className="flex flex-1 flex-col items-center gap-1 py-1.5"
+        aria-current={pathname === "/account" ? "page" : undefined}
+        style={{ color: pathname === "/account" ? "var(--kb-purple)" : "var(--kb-ink-soft)" }}
+      >
+        {pathname === "/account" && <span className="h-0.5 w-6 rounded-full" style={{ background: "var(--kb-purple)" }} />}
+        <ProfileIcon />
+        <span className="text-[11px] font-medium">Profile</span>
+      </Link>
     </nav>
   );
 }
@@ -45,16 +48,6 @@ function OrdersIcon() {
       <line x1="8" y1="9" x2="16" y2="9" />
       <line x1="8" y1="13" x2="16" y2="13" />
       <line x1="8" y1="17" x2="12" y2="17" />
-    </svg>
-  );
-}
-function DeliveryIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="6" cy="18" r="2.2" />
-      <circle cx="17" cy="18" r="2.2" />
-      <path d="M8 18h6l-2-6h4l2 4" />
-      <path d="M9 12l2-4h3" />
     </svg>
   );
 }
