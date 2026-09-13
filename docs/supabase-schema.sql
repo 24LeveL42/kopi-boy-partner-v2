@@ -372,3 +372,89 @@ create policy "Admins can read every pickup request"
 create policy "Admins can update every pickup request"
   on public.pickup_requests for update
   using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Feature #005: Cart + Order Creation
+-- Run this ONCE, after the Feature #002/#003 and picker-role scripts above,
+-- in the same Supabase project's SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 12. ORDERS
+-- One row per placed order. The app's checkout server action re-fetches real
+-- menu_items prices and computes subtotal itself — never trust a
+-- client-supplied total. status is deliberately a single-value enum for
+-- now ('placed'); #006 (cook accept/reject + PayNow) adds the rest of the
+-- state machine and the update policies needed to move an order through it.
+-- No delivery_fee column yet — that's #007; subtotal is the whole total
+-- until then.
+-- ----------------------------------------------------------------------------
+create table public.orders (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references public.profiles(id) on delete cascade,
+  kitchen_id uuid not null references public.kitchens(id) on delete cascade,
+  status text not null default 'placed' check (status in ('placed')),
+  subtotal numeric(7,2) not null check (subtotal > 0),
+  created_at timestamptz not null default now()
+);
+
+alter table public.orders enable row level security;
+
+create policy "Customers can create their own orders"
+  on public.orders for insert
+  with check (auth.uid() = customer_id);
+
+create policy "Customers can read their own orders"
+  on public.orders for select
+  using (auth.uid() = customer_id);
+
+create policy "Cooks can read orders placed at their kitchen"
+  on public.orders for select
+  using (auth.uid() = kitchen_id);
+
+create policy "Admins can read every order"
+  on public.orders for select
+  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+
+-- ----------------------------------------------------------------------------
+-- 13. ORDER ITEMS
+-- One row per line item. name/price are snapshotted at order time (copied
+-- from menu_items, not joined live) so a later menu edit or deletion never
+-- rewrites what a customer actually ordered and was charged for. The Partner
+-- app's KitchenSetupForm replaces a kitchen's menu_items wholesale on every
+-- save, so menu_item_id is set null (not cascaded) if the original row is
+-- gone — the snapshot is what matters for order history.
+-- ----------------------------------------------------------------------------
+create table public.order_items (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  menu_item_id uuid references public.menu_items(id) on delete set null,
+  name text not null,
+  price numeric(6,2) not null check (price > 0),
+  quantity int not null check (quantity > 0)
+);
+
+alter table public.order_items enable row level security;
+
+create policy "Customers can create items on their own orders"
+  on public.order_items for insert
+  with check (
+    exists (select 1 from public.orders o where o.id = order_items.order_id and o.customer_id = auth.uid())
+  );
+
+create policy "Customers can read items on their own orders"
+  on public.order_items for select
+  using (
+    exists (select 1 from public.orders o where o.id = order_items.order_id and o.customer_id = auth.uid())
+  );
+
+create policy "Cooks can read items on orders placed at their kitchen"
+  on public.order_items for select
+  using (
+    exists (select 1 from public.orders o where o.id = order_items.order_id and o.kitchen_id = auth.uid())
+  );
+
+create policy "Admins can read every order item"
+  on public.order_items for select
+  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
