@@ -40,6 +40,7 @@ export function PickerShell({ userId }: { userId: string }) {
   const [myPickup, setMyPickup] = useState<PickupRequestWithKitchen | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,23 +81,33 @@ export function PickerShell({ userId }: { userId: string }) {
 
   async function accept(requestId: string) {
     setBusyId(requestId);
-    await supabase
+    setError(null);
+    const { error: acceptError } = await supabase
       .from("pickup_requests")
       .update({ picker_id: userId, status: "accepted", accepted_at: new Date().toISOString() })
       .eq("id", requestId)
       .eq("status", "open"); // first to accept wins — a second picker's update matches 0 rows
     setBusyId(null);
+    if (acceptError) {
+      setError(acceptError.message);
+      return;
+    }
     load();
   }
 
   async function completeHandoff() {
     if (!myPickup) return;
     setBusyId(myPickup.id);
-    await supabase
+    setError(null);
+    const { error: completeError } = await supabase
       .from("pickup_requests")
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", myPickup.id);
     setBusyId(null);
+    if (completeError) {
+      setError(completeError.message);
+      return;
+    }
     load();
   }
 
@@ -107,6 +118,12 @@ export function PickerShell({ userId }: { userId: string }) {
       <h1 className="mt-4 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
         Picker
       </h1>
+
+      {error && (
+        <p className="mt-2 rounded-xl px-3 py-2 text-xs" style={{ background: "rgba(239,68,68,0.15)", color: "#FCA5A5" }}>
+          {error}
+        </p>
+      )}
 
       {myPickup ? (
         <div className="mt-4 rounded-2xl bg-white p-4" style={{ color: "var(--kb-ink)" }}>
