@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Logo } from "./Logo";
 
-type Step = "enter-phone" | "enter-code";
+type Step = "choice" | "enter-phone" | "enter-code";
+type Intent = "signup" | "signin";
 
 /**
  * Phone number is collected as an 8-digit local Singapore number and
@@ -16,7 +17,8 @@ type Step = "enter-phone" | "enter-code";
 const SG_PREFIX = "+65";
 
 export function LoginForm() {
-  const [step, setStep] = useState<Step>("enter-phone");
+  const [step, setStep] = useState<Step>("choice");
+  const [intent, setIntent] = useState<Intent>("signin");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -75,82 +77,127 @@ export function LoginForm() {
         <Logo size={56} />
       </div>
 
-      <button
-        onClick={handleGoogleSignIn}
-        disabled={googleLoading}
-        className="flex items-center justify-center gap-3 rounded-2xl bg-white py-3.5 text-[15px] font-semibold shadow-lg disabled:opacity-60"
-        style={{ color: "var(--kb-ink)" }}
-      >
-        <GoogleIcon />
-        {googleLoading ? "Redirecting…" : "Continue with Google"}
-      </button>
-
-      <div className="my-5 flex items-center gap-3">
-        <span className="h-px flex-1" style={{ background: "var(--kb-navy-line)" }} />
-        <span className="text-xs" style={{ color: "var(--kb-on-navy-soft)" }}>or</span>
-        <span className="h-px flex-1" style={{ background: "var(--kb-navy-line)" }} />
-      </div>
-
-      {step === "enter-phone" ? (
-        <form onSubmit={handleSendCode} className="space-y-3">
-          <div
-            className="flex items-center gap-2 rounded-2xl bg-white px-4 py-3.5"
-            style={{ color: "var(--kb-ink)" }}
-          >
-            <span className="text-[15px] font-medium" style={{ color: "var(--kb-ink-soft)" }}>
-              {SG_PREFIX}
-            </span>
-            <input
-              type="tel"
-              inputMode="numeric"
-              required
-              value={phone}
-              onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 8))}
-              placeholder="9123 4567"
-              className="w-full bg-transparent text-[15px] outline-none"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading || phone.length < 8}
-            className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
-            style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
-          >
-            {loading ? "Sending code…" : "Send login code"}
-          </button>
-        </form>
-      ) : (
-        <form onSubmit={handleVerifyCode} className="space-y-3">
-          <p className="text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
-            Enter the 6-digit code we sent to <span style={{ color: "var(--kb-on-navy)" }}>{fullPhone}</span>.
+      {step === "choice" ? (
+        <div className="space-y-3">
+          <h1 className="text-center font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
+            Kopi Boy Partners
+          </h1>
+          <p className="mb-3 text-center text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
+            New to Kopi Boy, or already a partner?
           </p>
-          <input
-            type="text"
-            inputMode="numeric"
-            required
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="123456"
-            className="w-full rounded-2xl bg-white px-4 py-3.5 text-center text-lg tracking-[0.3em] outline-none"
-            style={{ color: "var(--kb-ink)" }}
-          />
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
+            onClick={() => {
+              setIntent("signup");
+              setStep("enter-phone");
+            }}
+            className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white"
             style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
           >
-            {loading ? "Verifying…" : "Verify & continue"}
+            Sign up as a new partner
           </button>
           <button
-            type="button"
-            onClick={() => setStep("enter-phone")}
-            className="w-full text-center text-sm"
-            style={{ color: "var(--kb-on-navy-soft)" }}
+            onClick={() => {
+              setIntent("signin");
+              setStep("enter-phone");
+            }}
+            className="w-full rounded-2xl bg-white py-3.5 text-[15px] font-semibold shadow-lg"
+            style={{ color: "var(--kb-ink)" }}
           >
-            Use a different number
+            Sign in
           </button>
-        </form>
+        </div>
+      ) : (
+        <>
+          <p className="mb-5 text-center text-sm font-semibold" style={{ color: "var(--kb-on-navy-soft)" }}>
+            {intent === "signup" ? "Join as a partner" : "Welcome back"}
+          </p>
+
+          <button
+            onClick={handleGoogleSignIn}
+            disabled={googleLoading}
+            className="flex items-center justify-center gap-3 rounded-2xl bg-white py-3.5 text-[15px] font-semibold shadow-lg disabled:opacity-60"
+            style={{ color: "var(--kb-ink)" }}
+          >
+            <GoogleIcon />
+            {googleLoading ? "Redirecting…" : "Continue with Google"}
+          </button>
+
+          <div className="my-5 flex items-center gap-3">
+            <span className="h-px flex-1" style={{ background: "var(--kb-navy-line)" }} />
+            <span className="text-xs" style={{ color: "var(--kb-on-navy-soft)" }}>or</span>
+            <span className="h-px flex-1" style={{ background: "var(--kb-navy-line)" }} />
+          </div>
+
+          {step === "enter-phone" ? (
+            <form onSubmit={handleSendCode} className="space-y-3">
+              <div
+                className="flex items-center gap-2 rounded-2xl bg-white px-4 py-3.5"
+                style={{ color: "var(--kb-ink)" }}
+              >
+                <span className="text-[15px] font-medium" style={{ color: "var(--kb-ink-soft)" }}>
+                  {SG_PREFIX}
+                </span>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  required
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                  placeholder="9123 4567"
+                  className="w-full bg-transparent text-[15px] outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading || phone.length < 8}
+                className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
+                style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
+              >
+                {loading ? "Sending code…" : "Send login code"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep("choice")}
+                className="w-full text-center text-sm"
+                style={{ color: "var(--kb-on-navy-soft)" }}
+              >
+                &larr; Back
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyCode} className="space-y-3">
+              <p className="text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
+                Enter the 6-digit code we sent to <span style={{ color: "var(--kb-on-navy)" }}>{fullPhone}</span>.
+              </p>
+              <input
+                type="text"
+                inputMode="numeric"
+                required
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="123456"
+                className="w-full rounded-2xl bg-white px-4 py-3.5 text-center text-lg tracking-[0.3em] outline-none"
+                style={{ color: "var(--kb-ink)" }}
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
+                style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
+              >
+                {loading ? "Verifying…" : "Verify & continue"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep("enter-phone")}
+                className="w-full text-center text-sm"
+                style={{ color: "var(--kb-on-navy-soft)" }}
+              >
+                Use a different number
+              </button>
+            </form>
+          )}
+        </>
       )}
 
       {error && (
