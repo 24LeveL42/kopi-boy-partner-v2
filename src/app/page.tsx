@@ -72,7 +72,7 @@ export default async function Home() {
       return <PickerShell userId={user.id} />;
     }
 
-    return <PartnerShell defaultView={profile.role} />;
+    return <PartnerShell userId={user.id} defaultView={profile.role} />;
   }
 
   // Not yet a cook/rider/picker — check for an existing application.

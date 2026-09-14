@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { TopBar } from "./TopBar";
 import { BottomNav } from "./BottomNav";
+import { CookOrdersPanel } from "./CookOrdersPanel";
 
 /**
  * Partner app shell — real role detection now (Feature #002 is done).
- * Order-taking (#005/#006) and rider workflow (#008) aren't built yet,
- * so this shows an honest "not live yet" state instead of fake demo
- * orders/deliveries with non-functional buttons.
+ * Order-taking (#005/#006) is now live for cooks below. Rider workflow
+ * (#008) isn't built yet, so that side still shows an honest "not live
+ * yet" state instead of fake demo deliveries with non-functional buttons.
  */
-export function PartnerShell({ defaultView }: { defaultView: "cook" | "rider" }) {
+export function PartnerShell({ userId, defaultView }: { userId: string; defaultView: "cook" | "rider" }) {
   return (
     <div className="min-h-screen pb-24" style={{ background: "var(--kb-navy)" }}>
       <div className="mx-auto max-w-md px-4 pt-4 sm:max-w-lg sm:px-6">
@@ -26,9 +27,7 @@ export function PartnerShell({ defaultView }: { defaultView: "cook" | "rider" })
                 Manage kitchen &amp; menu &rsaquo;
               </Link>
             </div>
-            <p className="rounded-2xl bg-white p-5 text-sm shadow-lg" style={{ color: "var(--kb-ink-soft)" }}>
-              Order-taking isn&apos;t live yet — this lands with Feature #005/#006. Use &ldquo;Manage kitchen &amp; menu&rdquo; above to update your business photo, menu, and pricing — customers already see this live.
-            </p>
+            <CookOrdersPanel kitchenId={userId} />
           </>
         ) : (
           <>
