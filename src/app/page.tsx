@@ -124,6 +124,30 @@ export default async function Home() {
     );
   }
 
+  // Approved, but profile.role hasn't caught up yet (e.g. HQ approved the
+  // application row without also promoting the profile) — route straight
+  // into the real partner flow instead of back through the sign-up form.
+  if (latestApp?.status === "approved") {
+    if (latestApp === cookApp) {
+      return (
+        <KitchenSetupForm
+          userId={user.id}
+          defaults={{
+            business_name: cookApp.business_name,
+            neighbourhood: cookApp.neighbourhood ?? "",
+            description: cookApp.description ?? "",
+          }}
+        />
+      );
+    }
+    if (latestApp === riderApp) {
+      return <PartnerShell userId={user.id} defaultView="rider" />;
+    }
+    if (latestApp === pickerApp) {
+      return <PickerShell userId={user.id} />;
+    }
+  }
+
   // No application yet — show the sign-up form.
   return <ApplyForm userId={user.id} />;
 }
