@@ -26,10 +26,11 @@ interface DraftItem {
   name: string;
   price: string; // kept as text while editing, parsed to a number on submit
   photo_url: string;
+  photoUploading: boolean; // local UI state only — never sent to the DB
 }
 
 function emptyItem(): DraftItem {
-  return { key: crypto.randomUUID(), name: "", price: "", photo_url: "" };
+  return { key: crypto.randomUUID(), name: "", price: "", photo_url: "", photoUploading: false };
 }
 
 export function KitchenSetupForm({
@@ -53,14 +54,58 @@ export function KitchenSetupForm({
   const [neighbourhood, setNeighbourhood] = useState(existingKitchen?.neighbourhood ?? defaults.neighbourhood);
   const [description, setDescription] = useState(existingKitchen?.description ?? defaults.description ?? "");
   const [heroImage, setHeroImage] = useState(existingKitchen?.hero_image ?? "");
+  const [heroUploading, setHeroUploading] = useState(false);
   const [paynowUen, setPaynowUen] = useState(existingKitchen?.paynow_uen ?? "");
   const [items, setItems] = useState<DraftItem[]>(
     existingItems && existingItems.length > 0
-      ? existingItems.map((i) => ({ key: i.id, name: i.name, price: String(i.price), photo_url: i.photo_url ?? "" }))
+      ? existingItems.map((i) => ({ key: i.id, name: i.name, price: String(i.price), photo_url: i.photo_url ?? "", photoUploading: false }))
       : [emptyItem()]
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Uploads a cook-chosen file to the public kitchen-photos bucket under
+  // this cook's own folder (required by the bucket's RLS policies — see
+  // docs/supabase-schema.sql) and returns its public URL.
+  async function uploadPhoto(file: File, prefix: string): Promise<string> {
+    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const path = `${userId}/${prefix}-${crypto.randomUUID()}.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from("kitchen-photos")
+      .upload(path, file, { contentType: file.type || undefined });
+    if (uploadError) throw uploadError;
+    return supabase.storage.from("kitchen-photos").getPublicUrl(path).data.publicUrl;
+  }
+
+  async function handleHeroFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError(null);
+    setHeroUploading(true);
+    try {
+      setHeroImage(await uploadPhoto(file, "hero"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Photo upload failed.");
+    } finally {
+      setHeroUploading(false);
+    }
+  }
+
+  async function handleItemPhotoChange(key: string, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError(null);
+    updateItem(key, { photoUploading: true });
+    try {
+      const url = await uploadPhoto(file, "dish");
+      updateItem(key, { photo_url: url, photoUploading: false });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Photo upload failed.");
+      updateItem(key, { photoUploading: false });
+    }
+  }
 
   function updateItem(key: string, patch: Partial<DraftItem>) {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
@@ -71,7 +116,7 @@ export function KitchenSetupForm({
   }
 
   function removeItem(key: string) {
-    setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.key !== key) : prev));
+    setItems((prev) => prev.filter((it) => it.key !== key));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -203,14 +248,25 @@ export function KitchenSetupForm({
               style={{ borderColor: "#E5E7EB" }}
             />
           </Field>
-          <Field label="Kitchen photo URL (optional)">
-            <input
-              value={heroImage}
-              onChange={(e) => setHeroImage(e.target.value)}
-              placeholder="https://..."
-              className="w-full rounded-xl border px-3 py-2.5 text-sm"
-              style={{ borderColor: "#E5E7EB" }}
-            />
+          <Field label="Kitchen photo (optional)">
+            <div className="flex items-center gap-3">
+              {heroImage && (
+                // eslint-disable-next-line @next/next/no-img-element -- user-uploaded Supabase Storage URL, not a static asset
+                <img src={heroImage} alt="Kitchen" className="h-14 w-14 shrink-0 rounded-xl object-cover" />
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleHeroFileChange}
+                disabled={heroUploading}
+                className="w-full text-sm"
+              />
+            </div>
+            {heroUploading && (
+              <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                Uploading…
+              </p>
+            )}
           </Field>
           <Field label="PayNow UEN (customers pay you directly)">
             <input
@@ -230,33 +286,52 @@ export function KitchenSetupForm({
             </button>
           </div>
           {items.map((it, i) => (
-            <div key={it.key} className="flex items-end gap-2 border-b pb-3 last:border-0" style={{ borderColor: "#E5E7EB" }}>
-              <Field label={`Item ${i + 1} name`} className="flex-[2]">
+            <div key={it.key} className="space-y-2 border-b pb-3 last:border-0" style={{ borderColor: "#E5E7EB" }}>
+              <div className="flex items-end gap-2">
+                <Field label={`Item ${i + 1} name`} className="flex-[2]">
+                  <input
+                    value={it.name}
+                    onChange={(e) => updateItem(it.key, { name: e.target.value })}
+                    className="w-full rounded-xl border px-3 py-2.5 text-sm"
+                    style={{ borderColor: "#E5E7EB" }}
+                  />
+                </Field>
+                <Field label="Price ($)" className="flex-1">
+                  <input
+                    value={it.price}
+                    onChange={(e) => updateItem(it.key, { price: e.target.value })}
+                    inputMode="decimal"
+                    className="w-full rounded-xl border px-3 py-2.5 text-sm"
+                    style={{ borderColor: "#E5E7EB" }}
+                  />
+                </Field>
+                <button
+                  type="button"
+                  onClick={() => removeItem(it.key)}
+                  className="mb-0.5 shrink-0 rounded-xl px-3 py-2.5 text-sm"
+                  style={{ background: "var(--kb-cream)" }}
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                {it.photo_url && (
+                  // eslint-disable-next-line @next/next/no-img-element -- user-uploaded Supabase Storage URL, not a static asset
+                  <img src={it.photo_url} alt={it.name || "Dish"} className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+                )}
                 <input
-                  value={it.name}
-                  onChange={(e) => updateItem(it.key, { name: e.target.value })}
-                  className="w-full rounded-xl border px-3 py-2.5 text-sm"
-                  style={{ borderColor: "#E5E7EB" }}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleItemPhotoChange(it.key, e)}
+                  disabled={it.photoUploading}
+                  className="w-full text-xs"
                 />
-              </Field>
-              <Field label="Price ($)" className="flex-1">
-                <input
-                  value={it.price}
-                  onChange={(e) => updateItem(it.key, { price: e.target.value })}
-                  inputMode="decimal"
-                  className="w-full rounded-xl border px-3 py-2.5 text-sm"
-                  style={{ borderColor: "#E5E7EB" }}
-                />
-              </Field>
-              <button
-                type="button"
-                onClick={() => removeItem(it.key)}
-                disabled={items.length === 1}
-                className="mb-0.5 shrink-0 rounded-xl px-3 py-2.5 text-sm disabled:opacity-30"
-                style={{ background: "var(--kb-cream)" }}
-              >
-                Remove
-              </button>
+                {it.photoUploading && (
+                  <span className="shrink-0 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                    Uploading…
+                  </span>
+                )}
+              </div>
             </div>
           ))}
         </section>
@@ -269,7 +344,7 @@ export function KitchenSetupForm({
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || heroUploading || items.some((it) => it.photoUploading)}
           className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
           style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
         >

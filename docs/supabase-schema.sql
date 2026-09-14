@@ -7,6 +7,18 @@
 -- EXISTS, DROP POLICY/TRIGGER IF EXISTS before CREATE, CREATE OR REPLACE for
 -- functions, IF EXISTS/IF NOT EXISTS on ALTER statements). Running this whole
 -- file again on a database that already has some or all of it is safe.
+--
+-- GRANTs vs RLS: a table-level GRANT and a row-level policy are two separate
+-- gates that BOTH have to pass — a role with zero table-level GRANT gets
+-- "permission denied for table X" no matter what its RLS policies allow, and
+-- a role with a full GRANT but no matching policy row still sees/changes
+-- nothing. New Supabase projects grant ALL PRIVILEGES on every public table
+-- to `anon`/`authenticated` by default (via ALTER DEFAULT PRIVILEGES), which
+-- is why this file worked for a while without ever mentioning GRANT — but
+-- that's an implicit project setting, not something this file enforces, so
+-- every table below now has an explicit `grant ... to authenticated`
+-- immediately after it enables RLS, listing exactly the operations its own
+-- policies actually allow. Keep these two in sync whenever a policy changes.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -28,6 +40,12 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles enable row level security;
+
+-- Policies below only ever select/update (own row, or admin on every row) —
+-- no policy allows insert (rows are created only by the security-definer
+-- handle_new_user trigger below, which bypasses RLS/grants as its owner) or
+-- delete, so authenticated gets exactly select + update, nothing more.
+grant select, update on public.profiles to authenticated;
 
 -- Admin-check helper for RLS policies. Must be SECURITY DEFINER: a policy on
 -- public.profiles (or any table) that queries public.profiles directly to
@@ -94,6 +112,9 @@ create table if not exists public.cook_applications (
 
 alter table public.cook_applications enable row level security;
 
+-- select (own + admin), insert (own), update (admin review) — no delete policy.
+grant select, insert, update on public.cook_applications to authenticated;
+
 drop policy if exists "Applicants can read their own cook application" on public.cook_applications;
 create policy "Applicants can read their own cook application"
   on public.cook_applications for select
@@ -131,6 +152,9 @@ create table if not exists public.rider_applications (
 );
 
 alter table public.rider_applications enable row level security;
+
+-- select (own + admin), insert (own), update (admin review) — no delete policy.
+grant select, insert, update on public.rider_applications to authenticated;
 
 drop policy if exists "Applicants can read their own rider application" on public.rider_applications;
 create policy "Applicants can read their own rider application"
@@ -227,6 +251,11 @@ create table if not exists public.kitchens (
 
 alter table public.kitchens enable row level security;
 
+-- select (own cook + admin + anyone reading a live kitchen), insert/update
+-- (own cook only) — no delete policy (rows only disappear via the
+-- profiles-row cascade).
+grant select, insert, update on public.kitchens to authenticated;
+
 drop policy if exists "Cooks can read their own kitchen" on public.kitchens;
 create policy "Cooks can read their own kitchen"
   on public.kitchens for select
@@ -269,6 +298,11 @@ create table if not exists public.menu_items (
 );
 
 alter table public.menu_items enable row level security;
+
+-- "for all" (select/insert/update/delete) for the owning cook, plus select
+-- for anyone reading a live kitchen's menu. KitchenSetupForm's replace-all
+-- save (delete then insert) needs the delete grant, not just select/insert.
+grant select, insert, update, delete on public.menu_items to authenticated;
 
 drop policy if exists "Cooks can manage their own menu items" on public.menu_items;
 create policy "Cooks can manage their own menu items"
@@ -333,6 +367,9 @@ create table if not exists public.picker_applications (
 
 alter table public.picker_applications enable row level security;
 
+-- select (own + admin), insert (own), update (admin review) — no delete policy.
+grant select, insert, update on public.picker_applications to authenticated;
+
 drop policy if exists "Applicants can read their own picker application" on public.picker_applications;
 create policy "Applicants can read their own picker application"
   on public.picker_applications for select
@@ -380,6 +417,10 @@ create table if not exists public.pickup_requests (
 );
 
 alter table public.pickup_requests enable row level security;
+
+-- select (rider own, picker open/assigned, admin), insert (rider own),
+-- update (rider cancel, picker accept/complete, admin) — no delete policy.
+grant select, insert, update on public.pickup_requests to authenticated;
 
 drop policy if exists "Riders can create their own pickup requests" on public.pickup_requests;
 create policy "Riders can create their own pickup requests"
@@ -471,6 +512,11 @@ create table if not exists public.orders (
 
 alter table public.orders enable row level security;
 
+-- select (customer own, cook own kitchen, admin), insert (customer own),
+-- update (cook own kitchen, admin) — no delete policy (orders are never
+-- deleted, only transitioned via order_status/payment_status).
+grant select, insert, update on public.orders to authenticated;
+
 drop policy if exists "Customers can create their own orders" on public.orders;
 create policy "Customers can create their own orders"
   on public.orders for insert
@@ -520,6 +566,11 @@ create table if not exists public.order_items (
 );
 
 alter table public.order_items enable row level security;
+
+-- select (customer own order, cook own kitchen's order, admin), insert
+-- (customer own order) — no update or delete policy (line items are
+-- immutable snapshots once an order is placed).
+grant select, insert on public.order_items to authenticated;
 
 drop policy if exists "Customers can create items on their own orders" on public.order_items;
 create policy "Customers can create items on their own orders"
@@ -578,3 +629,48 @@ set paynow_uen = (
   limit 1
 )
 where k.paynow_uen is null;
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Kitchen photo uploads (Supabase Storage)
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 15. KITCHEN-PHOTOS STORAGE BUCKET
+-- Backs kitchens.hero_image and menu_items.photo_url: KitchenSetupForm
+-- uploads the cook's chosen file here and stores the resulting public URL in
+-- those columns, instead of asking cooks to host images themselves and paste
+-- a URL. Public bucket — these photos are shown to customers in the
+-- marketplace, same trust level as a live kitchen's name/menu. Objects are
+-- stored under `<cook's auth uid>/...`, which is what the policies below
+-- check via storage.foldername() to scope writes to the owning cook.
+-- ----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('kitchen-photos', 'kitchen-photos', true)
+on conflict (id) do nothing;
+
+drop policy if exists "Anyone can view kitchen photos" on storage.objects;
+create policy "Anyone can view kitchen photos"
+  on storage.objects for select
+  using (bucket_id = 'kitchen-photos');
+
+drop policy if exists "Cooks can upload their own kitchen photos" on storage.objects;
+create policy "Cooks can upload their own kitchen photos"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'kitchen-photos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "Cooks can update their own kitchen photos" on storage.objects;
+create policy "Cooks can update their own kitchen photos"
+  on storage.objects for update
+  using (bucket_id = 'kitchen-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'kitchen-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "Cooks can delete their own kitchen photos" on storage.objects;
+create policy "Cooks can delete their own kitchen photos"
+  on storage.objects for delete
+  using (bucket_id = 'kitchen-photos' and (storage.foldername(name))[1] = auth.uid()::text);
