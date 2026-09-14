@@ -138,7 +138,6 @@ export function KitchenSetupForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    console.log("[KitchenSetupForm] submit fired", { businessName, neighbourhood, itemCount: items.length });
     setError(null);
 
     const validItems = items
@@ -146,12 +145,10 @@ export function KitchenSetupForm({
       .filter((it) => it.name.length > 0 && !Number.isNaN(it.price) && it.price > 0);
 
     if (!businessName.trim() || !neighbourhood.trim()) {
-      console.log("[KitchenSetupForm] blocked: missing business name or neighbourhood");
       setError("Business name and neighbourhood are required.");
       return;
     }
     if (validItems.length === 0) {
-      console.log("[KitchenSetupForm] blocked: no valid menu items", items);
       setError("Add at least one menu item with a name and a price above $0 — this is required before you can go live.");
       return;
     }
@@ -173,7 +170,6 @@ export function KitchenSetupForm({
       if (kitchenError) throw kitchenError;
 
       // Replace-all on every save — simplest correct approach at this scope.
-      // Both steps' errors were previously ignored/uncaught; now surfaced.
       const { error: deleteError } = await supabase.from("menu_items").delete().eq("kitchen_id", userId);
       if (deleteError) throw deleteError;
 
@@ -187,8 +183,19 @@ export function KitchenSetupForm({
       );
       if (itemsError) throw itemsError;
 
-      router.push("/");
-      router.refresh();
+      if (isEdit) {
+        // Editing happens on a separate /kitchen route — navigate back to
+        // the dashboard.
+        router.push("/");
+        router.refresh();
+      } else {
+        // First-time setup is rendered directly at "/" (see src/app/page.tsx),
+        // so we're already on the target URL — router.push("/") to the
+        // current URL is a same-route no-op here and won't pick up the
+        // fresh kitchen row. refresh() alone re-renders this route with the
+        // now-existing kitchen, which sends the cook to the dashboard.
+        router.refresh();
+      }
     } catch (err) {
       setError(describeSupabaseError(err));
     } finally {
