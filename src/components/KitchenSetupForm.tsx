@@ -53,6 +53,7 @@ export function KitchenSetupForm({
   const [neighbourhood, setNeighbourhood] = useState(existingKitchen?.neighbourhood ?? defaults.neighbourhood);
   const [description, setDescription] = useState(existingKitchen?.description ?? defaults.description ?? "");
   const [heroImage, setHeroImage] = useState(existingKitchen?.hero_image ?? "");
+  const [paynowUen, setPaynowUen] = useState(existingKitchen?.paynow_uen ?? "");
   const [items, setItems] = useState<DraftItem[]>(
     existingItems && existingItems.length > 0
       ? existingItems.map((i) => ({ key: i.id, name: i.name, price: String(i.price), photo_url: i.photo_url ?? "" }))
@@ -100,6 +101,7 @@ export function KitchenSetupForm({
       neighbourhood: neighbourhood.trim(),
       description: description.trim() || null,
       hero_image: heroImage.trim() || null,
+      paynow_uen: paynowUen.trim() || null,
       is_live: true,
     });
 
@@ -206,6 +208,14 @@ export function KitchenSetupForm({
               value={heroImage}
               onChange={(e) => setHeroImage(e.target.value)}
               placeholder="https://..."
+              className="w-full rounded-xl border px-3 py-2.5 text-sm"
+              style={{ borderColor: "#E5E7EB" }}
+            />
+          </Field>
+          <Field label="PayNow UEN (customers pay you directly)">
+            <input
+              value={paynowUen}
+              onChange={(e) => setPaynowUen(e.target.value)}
               className="w-full rounded-xl border px-3 py-2.5 text-sm"
               style={{ borderColor: "#E5E7EB" }}
             />

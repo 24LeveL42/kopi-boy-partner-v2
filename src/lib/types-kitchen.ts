@@ -20,6 +20,7 @@ export interface Kitchen {
   description: string | null;
   hero_image: string | null;
   is_live: boolean;
+  paynow_uen: string | null;
 }
 
 export interface MenuItem {
