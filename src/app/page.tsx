@@ -129,6 +129,20 @@ export default async function Home() {
   // into the real partner flow instead of back through the sign-up form.
   if (latestApp?.status === "approved") {
     if (latestApp === cookApp) {
+      // Same "already set up?" check as the profile.role === "cook" branch
+      // above — without it, an approved cook whose role hasn't been
+      // promoted yet gets sent back to Kitchen Setup forever, even after
+      // successfully saving a kitchen.
+      const { data: kitchen } = await supabase
+        .from("kitchens")
+        .select("*")
+        .eq("id", user.id)
+        .maybeSingle<Kitchen>();
+
+      if (kitchen) {
+        return <PartnerShell userId={user.id} defaultView="cook" />;
+      }
+
       return (
         <KitchenSetupForm
           userId={user.id}
