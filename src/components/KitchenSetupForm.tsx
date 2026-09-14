@@ -33,6 +33,23 @@ function emptyItem(): DraftItem {
   return { key: crypto.randomUUID(), name: "", price: "", photo_url: "", photoUploading: false };
 }
 
+// Supabase errors (Postgrest, Storage, or a raw fetch/network throw) don't
+// share one shape, and `.message` is sometimes empty even when `.details`/
+// `.hint` have the actual reason — so pull whatever's there instead of
+// trusting any single field, and always log the raw object so the full
+// error (code, details, hint, stack) is visible in devtools too.
+function describeSupabaseError(err: unknown): string {
+  console.error("KitchenSetupForm error:", err);
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [e.message, e.details, e.hint].filter((p): p is string => !!p && p.trim().length > 0);
+    if (parts.length > 0) {
+      return e.code ? `${parts.join(" — ")} (code: ${e.code})` : parts.join(" — ");
+    }
+  }
+  return "Something went wrong saving your kitchen — check the browser console for the full error.";
+}
+
 export function KitchenSetupForm({
   userId,
   defaults,
@@ -86,7 +103,7 @@ export function KitchenSetupForm({
     try {
       setHeroImage(await uploadPhoto(file, "hero"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Photo upload failed.");
+      setError(describeSupabaseError(err));
     } finally {
       setHeroUploading(false);
     }
@@ -102,7 +119,7 @@ export function KitchenSetupForm({
       const url = await uploadPhoto(file, "dish");
       updateItem(key, { photo_url: url, photoUploading: false });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Photo upload failed.");
+      setError(describeSupabaseError(err));
       updateItem(key, { photoUploading: false });
     }
   }
@@ -138,43 +155,42 @@ export function KitchenSetupForm({
 
     setLoading(true);
 
-    const { error: kitchenError } = await supabase.from("kitchens").upsert({
-      id: userId,
-      business_name: businessName.trim(),
-      category,
-      cuisine_type: cuisineType,
-      neighbourhood: neighbourhood.trim(),
-      description: description.trim() || null,
-      hero_image: heroImage.trim() || null,
-      paynow_uen: paynowUen.trim() || null,
-      is_live: true,
-    });
+    try {
+      const { error: kitchenError } = await supabase.from("kitchens").upsert({
+        id: userId,
+        business_name: businessName.trim(),
+        category,
+        cuisine_type: cuisineType,
+        neighbourhood: neighbourhood.trim(),
+        description: description.trim() || null,
+        hero_image: heroImage.trim() || null,
+        paynow_uen: paynowUen.trim() || null,
+        is_live: true,
+      });
+      if (kitchenError) throw kitchenError;
 
-    if (kitchenError) {
-      setError(kitchenError.message);
+      // Replace-all on every save — simplest correct approach at this scope.
+      // Both steps' errors were previously ignored/uncaught; now surfaced.
+      const { error: deleteError } = await supabase.from("menu_items").delete().eq("kitchen_id", userId);
+      if (deleteError) throw deleteError;
+
+      const { error: itemsError } = await supabase.from("menu_items").insert(
+        validItems.map((it) => ({
+          kitchen_id: userId,
+          name: it.name,
+          price: it.price,
+          photo_url: it.photo_url.trim() || null,
+        }))
+      );
+      if (itemsError) throw itemsError;
+
+      router.push("/");
+      router.refresh();
+    } catch (err) {
+      setError(describeSupabaseError(err));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // Replace-all on every save — simplest correct approach at this scope.
-    await supabase.from("menu_items").delete().eq("kitchen_id", userId);
-    const { error: itemsError } = await supabase.from("menu_items").insert(
-      validItems.map((it) => ({
-        kitchen_id: userId,
-        name: it.name,
-        price: it.price,
-        photo_url: it.photo_url.trim() || null,
-      }))
-    );
-
-    setLoading(false);
-    if (itemsError) {
-      setError(itemsError.message);
-      return;
-    }
-
-    router.push("/");
-    router.refresh();
   }
 
   return (
