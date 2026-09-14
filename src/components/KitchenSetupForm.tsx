@@ -138,6 +138,7 @@ export function KitchenSetupForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    console.log("[KitchenSetupForm] submit fired", { businessName, neighbourhood, itemCount: items.length });
     setError(null);
 
     const validItems = items
@@ -145,10 +146,12 @@ export function KitchenSetupForm({
       .filter((it) => it.name.length > 0 && !Number.isNaN(it.price) && it.price > 0);
 
     if (!businessName.trim() || !neighbourhood.trim()) {
+      console.log("[KitchenSetupForm] blocked: missing business name or neighbourhood");
       setError("Business name and neighbourhood are required.");
       return;
     }
     if (validItems.length === 0) {
+      console.log("[KitchenSetupForm] blocked: no valid menu items", items);
       setError("Add at least one menu item with a name and a price above $0 — this is required before you can go live.");
       return;
     }
