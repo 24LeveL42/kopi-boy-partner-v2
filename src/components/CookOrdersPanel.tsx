@@ -18,6 +18,7 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
   const supabase = createClient();
   const [newOrders, setNewOrders] = useState<OrderWithItems[]>([]);
   const [awaitingPayment, setAwaitingPayment] = useState<OrderWithItems[]>([]);
+  const [inKitchen, setInKitchen] = useState<OrderWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +43,7 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
     const rows = data ?? [];
     setNewOrders(rows.filter((o) => o.order_status === "placed"));
     setAwaitingPayment(rows.filter((o) => o.order_status === "accepted" && o.payment_status === "unpaid"));
+    setInKitchen(rows.filter((o) => o.order_status === "accepted"));
     setLoading(false);
   }, [supabase, kitchenId]);
 
@@ -80,6 +82,40 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
     setBusyId(null);
     if (paidError) {
       setError(paidError.message);
+      return;
+    }
+    load();
+  }
+
+  async function startCooking(orderId: string) {
+    setBusyId(orderId);
+    setError(null);
+    const { error: startError } = await supabase
+      .from("orders")
+      .update({ preparation_status: "preparing" })
+      .eq("id", orderId)
+      .eq("order_status", "accepted")
+      .eq("preparation_status", "not_started"); // can't start cooking before accepted / twice
+    setBusyId(null);
+    if (startError) {
+      setError(startError.message);
+      return;
+    }
+    load();
+  }
+
+  async function markReady(orderId: string) {
+    setBusyId(orderId);
+    setError(null);
+    const { error: readyError } = await supabase
+      .from("orders")
+      .update({ preparation_status: "ready" })
+      .eq("id", orderId)
+      .eq("order_status", "accepted")
+      .eq("preparation_status", "preparing"); // can't skip straight from not_started / twice
+    setBusyId(null);
+    if (readyError) {
+      setError(readyError.message);
       return;
     }
     load();
@@ -163,6 +199,54 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
                 >
                   {busyId === o.id ? "Saving…" : "Mark PayNow received"}
                 </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="text-xs font-semibold uppercase" style={{ color: "var(--kb-on-navy-soft)" }}>
+          In the kitchen
+        </h3>
+        {inKitchen.length === 0 ? (
+          <p className="mt-2 rounded-2xl bg-white p-4 text-sm" style={{ color: "var(--kb-ink-soft)" }}>
+            No accepted orders in prep right now.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {inKitchen.map((o) => (
+              <div key={o.id} className="rounded-2xl bg-white p-4" style={{ color: "var(--kb-ink)" }}>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Order #{shortId(o.id)}</p>
+                  <p className="text-sm font-semibold">${o.subtotal.toFixed(2)}</p>
+                </div>
+                <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>{itemsSummary(o)}</p>
+                {o.preparation_status === "not_started" && (
+                  <button
+                    onClick={() => startCooking(o.id)}
+                    disabled={busyId === o.id}
+                    className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    style={{ background: "var(--kb-green-deep)" }}
+                  >
+                    {busyId === o.id ? "Saving…" : "Start Cooking"}
+                  </button>
+                )}
+                {o.preparation_status === "preparing" && (
+                  <button
+                    onClick={() => markReady(o.id)}
+                    disabled={busyId === o.id}
+                    className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    style={{ background: "var(--kb-purple)" }}
+                  >
+                    {busyId === o.id ? "Saving…" : "Mark Ready — Looking for Rider"}
+                  </button>
+                )}
+                {o.preparation_status === "ready" && (
+                  <p className="mt-3 text-center text-sm font-semibold" style={{ color: "var(--kb-ink-soft)" }}>
+                    Ready — looking for rider
+                  </p>
+                )}
               </div>
             ))}
           </div>

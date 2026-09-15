@@ -674,3 +674,33 @@ drop policy if exists "Cooks can delete their own kitchen photos" on storage.obj
 create policy "Cooks can delete their own kitchen photos"
   on storage.objects for delete
   using (bucket_id = 'kitchen-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Cook preparation status
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 16. PREPARATION STATUS ON ORDERS
+-- Kitchen-side "is the food actually being made" tracking, separate from
+-- order_status (accept/reject) and payment_status (PayNow received) per the
+-- same locked business rule as those two (see docs/feature-001.md) —
+-- order/payment/preparation/delivery/incident stay separate fields, never
+-- one combined enum. A cook starts cooking only after accepting an order,
+-- and marks it ready only after starting it — enforced the same
+-- "app's update call includes the expected current state in its WHERE
+-- clause" way as the order_status/payment_status transitions above, not by
+-- a DB-level state machine. No rider-assignment logic yet — that's #008.
+--
+-- No new GRANT needed: the existing `grant select, insert, update on
+-- public.orders to authenticated` above is table-level (no column list), so
+-- it already covers this column, and the existing "Cooks can update orders
+-- placed at their kitchen" policy (auth.uid() = kitchen_id, no column
+-- restriction) already allows a cook to change it on their own kitchen's
+-- orders.
+-- ----------------------------------------------------------------------------
+alter table public.orders
+  add column if not exists preparation_status text not null default 'not_started'
+  check (preparation_status in ('not_started', 'preparing', 'ready'));
