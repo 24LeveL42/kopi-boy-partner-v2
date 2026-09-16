@@ -4,7 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Logo } from "./Logo";
-import type { Kitchen, MenuItem, MerchantCategory, CuisineType } from "@/lib/types-kitchen";
+import type { Kitchen, MenuItem, MerchantCategory, CuisineType, PaynowType } from "@/lib/types-kitchen";
+
+const PAYNOW_TYPES: { id: PaynowType; label: string }[] = [
+  { id: "mobile", label: "PayNow Mobile Number" },
+  { id: "uen", label: "PayNow UEN" },
+];
 
 const CATEGORIES: { id: MerchantCategory; label: string }[] = [
   { id: "home-cook", label: "Home Cook" },
@@ -72,7 +77,8 @@ export function KitchenSetupForm({
   const [description, setDescription] = useState(existingKitchen?.description ?? defaults.description ?? "");
   const [heroImage, setHeroImage] = useState(existingKitchen?.hero_image ?? "");
   const [heroUploading, setHeroUploading] = useState(false);
-  const [paynowUen, setPaynowUen] = useState(existingKitchen?.paynow_uen ?? "");
+  const [paynowType, setPaynowType] = useState<PaynowType>(existingKitchen?.paynow_type ?? "mobile");
+  const [paynowValue, setPaynowValue] = useState(existingKitchen?.paynow_value ?? "");
   const [items, setItems] = useState<DraftItem[]>(
     existingItems && existingItems.length > 0
       ? existingItems.map((i) => ({ key: i.id, name: i.name, price: String(i.price), photo_url: i.photo_url ?? "", photoUploading: false }))
@@ -164,7 +170,8 @@ export function KitchenSetupForm({
         neighbourhood: neighbourhood.trim(),
         description: description.trim() || null,
         hero_image: heroImage.trim() || null,
-        paynow_uen: paynowUen.trim() || null,
+        paynow_type: paynowType,
+        paynow_value: paynowValue.trim() || null,
         is_live: true,
       });
       if (kitchenError) throw kitchenError;
@@ -294,10 +301,24 @@ export function KitchenSetupForm({
               </p>
             )}
           </Field>
-          <Field label="PayNow UEN (customers pay you directly)">
+          <Field label="PayNow method (customers pay you directly)">
+            <select
+              value={paynowType}
+              onChange={(e) => setPaynowType(e.target.value as PaynowType)}
+              className="w-full rounded-xl border px-3 py-2.5 text-sm"
+              style={{ borderColor: "#E5E7EB" }}
+            >
+              {PAYNOW_TYPES.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={paynowType === "mobile" ? "PayNow mobile number" : "PayNow UEN"}>
             <input
-              value={paynowUen}
-              onChange={(e) => setPaynowUen(e.target.value)}
+              value={paynowValue}
+              onChange={(e) => setPaynowValue(e.target.value)}
               className="w-full rounded-xl border px-3 py-2.5 text-sm"
               style={{ borderColor: "#E5E7EB" }}
             />

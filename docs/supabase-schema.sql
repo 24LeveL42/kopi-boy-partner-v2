@@ -704,3 +704,30 @@ create policy "Cooks can delete their own kitchen photos"
 alter table public.orders
   add column if not exists preparation_status text not null default 'not_started'
   check (preparation_status in ('not_started', 'preparing', 'ready'));
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — PayNow method split on kitchens
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 17. PAYNOW TYPE + VALUE ON KITCHENS
+-- Cooks pay into either a PayNow mobile number or a PayNow UEN, and a single
+-- free-text `paynow_uen` column couldn't say which one a given value was.
+-- Split into `paynow_type` (which kind) and `paynow_value` (the number/UEN
+-- itself). Existing `paynow_uen` values are all UENs (that was the only kind
+-- this column ever captured), so they're carried into `paynow_value` with
+-- `paynow_type` set to 'uen'. No new GRANT/RLS needed — same as section 14,
+-- the existing "Cooks can update their own kitchen" / "Anyone can read live
+-- kitchens" policies already cover these columns.
+-- ----------------------------------------------------------------------------
+alter table public.kitchens add column if not exists paynow_type text check (paynow_type in ('mobile', 'uen'));
+alter table public.kitchens add column if not exists paynow_value text;
+
+update public.kitchens
+set paynow_type = 'uen', paynow_value = paynow_uen
+where paynow_uen is not null and paynow_value is null;
+
+alter table public.kitchens drop column if exists paynow_uen;

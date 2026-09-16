@@ -10,6 +10,7 @@
 
 export type MerchantCategory = "home-cook" | "hawker" | "bakery" | "bulk-orders" | "drinks";
 export type CuisineType = "chinese" | "halal" | "indian" | "western";
+export type PaynowType = "mobile" | "uen";
 
 export interface Kitchen {
   id: string;
@@ -20,7 +21,8 @@ export interface Kitchen {
   description: string | null;
   hero_image: string | null;
   is_live: boolean;
-  paynow_uen: string | null;
+  paynow_type: PaynowType | null;
+  paynow_value: string | null;
 }
 
 export interface MenuItem {
