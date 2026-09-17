@@ -23,6 +23,8 @@ export interface Kitchen {
   is_live: boolean;
   paynow_type: PaynowType | null;
   paynow_value: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface MenuItem {

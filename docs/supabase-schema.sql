@@ -731,3 +731,25 @@ set paynow_type = 'uen', paynow_value = paynow_uen
 where paynow_uen is not null and paynow_value is null;
 
 alter table public.kitchens drop column if exists paynow_uen;
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Kitchen geolocation
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 19. LATITUDE + LONGITUDE ON KITCHENS
+-- Real coordinates alongside (not replacing) the free-text `neighbourhood`
+-- field, captured via the browser's Geolocation API in KitchenSetupForm.
+-- Both optional — a cook can decline the permission prompt or use a browser
+-- without geolocation support and still go live with neighbourhood text
+-- alone, same as hero_image being optional. No new GRANT/RLS needed — same
+-- as sections 14/17, the existing `grant select, insert, update on
+-- public.kitchens to authenticated` and "Cooks can update their own kitchen"
+-- / "Anyone can read live kitchens" policies are table-level (no column
+-- list) and already cover these columns.
+-- ----------------------------------------------------------------------------
+alter table public.kitchens add column if not exists latitude numeric(9,6);
+alter table public.kitchens add column if not exists longitude numeric(9,6);

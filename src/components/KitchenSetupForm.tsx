@@ -38,6 +38,8 @@ function emptyItem(): DraftItem {
   return { key: crypto.randomUUID(), name: "", price: "", photo_url: "", photoUploading: false };
 }
 
+type LocationStatus = "idle" | "locating" | "success" | "denied" | "unavailable" | "unsupported";
+
 // Supabase errors (Postgrest, Storage, or a raw fetch/network throw) don't
 // share one shape, and `.message` is sometimes empty even when `.details`/
 // `.hint` have the actual reason — so pull whatever's there instead of
@@ -79,6 +81,9 @@ export function KitchenSetupForm({
   const [heroUploading, setHeroUploading] = useState(false);
   const [paynowType, setPaynowType] = useState<PaynowType>(existingKitchen?.paynow_type ?? "mobile");
   const [paynowValue, setPaynowValue] = useState(existingKitchen?.paynow_value ?? "");
+  const [latitude, setLatitude] = useState<number | null>(existingKitchen?.latitude ?? null);
+  const [longitude, setLongitude] = useState<number | null>(existingKitchen?.longitude ?? null);
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
   const [items, setItems] = useState<DraftItem[]>(
     existingItems && existingItems.length > 0
       ? existingItems.map((i) => ({ key: i.id, name: i.name, price: String(i.price), photo_url: i.photo_url ?? "", photoUploading: false }))
@@ -130,6 +135,30 @@ export function KitchenSetupForm({
     }
   }
 
+  // Optional — purely additive alongside the neighbourhood text field. Never
+  // blocks kitchen setup: every failure path (no browser support, denied
+  // permission, position unavailable/timeout) just resets to a message and
+  // leaves latitude/longitude null.
+  function handleUseCurrentLocation() {
+    setError(null);
+    if (!("geolocation" in navigator)) {
+      setLocationStatus("unsupported");
+      return;
+    }
+    setLocationStatus("locating");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLatitude(position.coords.latitude);
+        setLongitude(position.coords.longitude);
+        setLocationStatus("success");
+      },
+      (geoError) => {
+        setLocationStatus(geoError.code === geoError.PERMISSION_DENIED ? "denied" : "unavailable");
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60_000 }
+    );
+  }
+
   function updateItem(key: string, patch: Partial<DraftItem>) {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
   }
@@ -172,6 +201,8 @@ export function KitchenSetupForm({
         hero_image: heroImage.trim() || null,
         paynow_type: paynowType,
         paynow_value: paynowValue.trim() || null,
+        latitude,
+        longitude,
         is_live: true,
       });
       if (kitchenError) throw kitchenError;
@@ -271,6 +302,38 @@ export function KitchenSetupForm({
               className="w-full rounded-xl border px-3 py-2.5 text-sm"
               style={{ borderColor: "#E5E7EB" }}
             />
+          </Field>
+          <Field label="Precise location (optional)">
+            <button
+              type="button"
+              onClick={handleUseCurrentLocation}
+              disabled={locationStatus === "locating"}
+              className="w-full rounded-xl border px-3 py-2.5 text-sm font-medium disabled:opacity-60"
+              style={{ borderColor: "#E5E7EB", color: "var(--kb-purple)" }}
+            >
+              {locationStatus === "locating" ? "Getting your location…" : "Use my current location"}
+            </button>
+            {locationStatus === "success" && latitude != null && longitude != null && (
+              <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                Location captured ({latitude.toFixed(5)}, {longitude.toFixed(5)}).
+              </p>
+            )}
+            {locationStatus === "denied" && (
+              <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                Location permission was denied — that&apos;s fine, your neighbourhood text above is still used. You
+                can allow location access in your browser settings and try again any time.
+              </p>
+            )}
+            {locationStatus === "unavailable" && (
+              <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                Couldn&apos;t get your location right now — no problem, this is optional and you can try again later.
+              </p>
+            )}
+            {locationStatus === "unsupported" && (
+              <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                Your browser doesn&apos;t support location detection — no problem, this is optional.
+              </p>
+            )}
           </Field>
           <Field label="Description (optional)">
             <textarea
