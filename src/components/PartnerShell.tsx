@@ -2,12 +2,12 @@ import Link from "next/link";
 import { TopBar } from "./TopBar";
 import { BottomNav } from "./BottomNav";
 import { CookOrdersPanel } from "./CookOrdersPanel";
+import { RiderDeliveriesPanel } from "./RiderDeliveriesPanel";
 
 /**
  * Partner app shell — real role detection now (Feature #002 is done).
- * Order-taking (#005/#006) is now live for cooks below. Rider workflow
- * (#008) isn't built yet, so that side still shows an honest "not live
- * yet" state instead of fake demo deliveries with non-functional buttons.
+ * Order-taking (#005/#006) is live for cooks, and the rider delivery
+ * workflow (#008) is live below.
  */
 export function PartnerShell({ userId, defaultView }: { userId: string; defaultView: "cook" | "rider" }) {
   return (
@@ -39,9 +39,7 @@ export function PartnerShell({ userId, defaultView }: { userId: string; defaultV
                 Request a picker &rsaquo;
               </Link>
             </div>
-            <p className="rounded-2xl bg-white p-5 text-sm shadow-lg" style={{ color: "var(--kb-ink-soft)" }}>
-              Delivery job matching isn&apos;t live yet — this lands with Feature #008 (rider workflow).
-            </p>
+            <RiderDeliveriesPanel riderId={userId} />
           </>
         )}
       </main>

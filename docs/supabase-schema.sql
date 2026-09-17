@@ -734,6 +734,99 @@ alter table public.kitchens drop column if exists paynow_uen;
 
 
 -- ============================================================================
+-- KOPI BOY 2.0 — Feature #008: Rider Delivery Requests
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 18. DELIVERY REQUESTS
+-- The cook-initiated, rider-fulfilled handshake for the final leg: once a
+-- cook marks an order preparation_status = 'ready', they request a rider ->
+-- any approved rider can accept -> rider collects from the cook and marks
+-- the delivery complete. Same "first to accept wins" pattern as
+-- pickup_requests, with the cook/rider roles swapped for the picker/rider
+-- roles there. Unlike pickup_requests, this table links to a real order
+-- (order_id), so the fee is agreed directly between cook and rider
+-- off-platform — no suggested_fee column here.
+-- ----------------------------------------------------------------------------
+create table if not exists public.delivery_requests (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  kitchen_id uuid not null references public.kitchens(id) on delete cascade,
+  rider_id uuid references public.profiles(id),
+  status text not null default 'open' check (status in ('open', 'accepted', 'completed', 'cancelled')),
+  created_at timestamptz not null default now(),
+  accepted_at timestamptz,
+  completed_at timestamptz
+);
+
+alter table public.delivery_requests enable row level security;
+
+-- select (cook own kitchen, rider open/assigned, admin), insert (cook own
+-- kitchen), update (cook cancel, rider accept/complete, admin) — no delete
+-- policy. Mirrors pickup_requests' grant exactly.
+grant select, insert, update on public.delivery_requests to authenticated;
+
+drop policy if exists "Cooks can create delivery requests for their own kitchen" on public.delivery_requests;
+create policy "Cooks can create delivery requests for their own kitchen"
+  on public.delivery_requests for insert
+  with check (
+    auth.uid() = kitchen_id
+    and exists (select 1 from public.orders o where o.id = delivery_requests.order_id and o.kitchen_id = delivery_requests.kitchen_id)
+  );
+
+drop policy if exists "Cooks can read their own kitchen's delivery requests" on public.delivery_requests;
+create policy "Cooks can read their own kitchen's delivery requests"
+  on public.delivery_requests for select
+  using (auth.uid() = kitchen_id);
+
+drop policy if exists "Cooks can cancel their own open delivery requests" on public.delivery_requests;
+create policy "Cooks can cancel their own open delivery requests"
+  on public.delivery_requests for update
+  using (auth.uid() = kitchen_id and status = 'open')
+  with check (auth.uid() = kitchen_id and status = 'cancelled');
+
+drop policy if exists "Riders can read open delivery requests" on public.delivery_requests;
+create policy "Riders can read open delivery requests"
+  on public.delivery_requests for select
+  using (
+    status = 'open'
+    and public.user_has_role('rider')
+  );
+
+drop policy if exists "Riders can read their assigned delivery requests" on public.delivery_requests;
+create policy "Riders can read their assigned delivery requests"
+  on public.delivery_requests for select
+  using (auth.uid() = rider_id);
+
+drop policy if exists "Riders can accept an open delivery request" on public.delivery_requests;
+create policy "Riders can accept an open delivery request"
+  on public.delivery_requests for update
+  using (
+    status = 'open'
+    and public.user_has_role('rider')
+  )
+  with check (rider_id = auth.uid() and status = 'accepted');
+
+drop policy if exists "Riders can complete their assigned delivery request" on public.delivery_requests;
+create policy "Riders can complete their assigned delivery request"
+  on public.delivery_requests for update
+  using (auth.uid() = rider_id)
+  with check (auth.uid() = rider_id);
+
+drop policy if exists "Admins can read every delivery request" on public.delivery_requests;
+create policy "Admins can read every delivery request"
+  on public.delivery_requests for select
+  using (public.user_has_role('admin'));
+
+drop policy if exists "Admins can update every delivery request" on public.delivery_requests;
+create policy "Admins can update every delivery request"
+  on public.delivery_requests for update
+  using (public.user_has_role('admin'));
+
+
+-- ============================================================================
 -- KOPI BOY 2.0 — Kitchen geolocation
 -- Run this ONCE, after every script above, in the same Supabase project's
 -- SQL Editor.

@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { OrderWithItems } from "@/lib/types-orders";
+import type { DeliveryRequest } from "@/lib/types-delivery";
+
+interface OrderWithDelivery extends OrderWithItems {
+  delivery_requests: DeliveryRequest[];
+}
 
 // Cooks can't read the customer's profile (no RLS policy grants that), so
 // order cards are identified by a short id + timestamp, not a customer name.
@@ -18,7 +23,7 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
   const supabase = createClient();
   const [newOrders, setNewOrders] = useState<OrderWithItems[]>([]);
   const [awaitingPayment, setAwaitingPayment] = useState<OrderWithItems[]>([]);
-  const [inKitchen, setInKitchen] = useState<OrderWithItems[]>([]);
+  const [inKitchen, setInKitchen] = useState<OrderWithDelivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,11 +33,11 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
 
     const { data, error: loadError } = await supabase
       .from("orders")
-      .select("*, order_items(*)")
+      .select("*, order_items(*), delivery_requests(*)")
       .eq("kitchen_id", kitchenId)
       .in("order_status", ["placed", "accepted"])
       .order("created_at", { ascending: true })
-      .returns<OrderWithItems[]>();
+      .returns<OrderWithDelivery[]>();
 
     if (loadError) {
       setError(loadError.message);
@@ -116,6 +121,20 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
     setBusyId(null);
     if (readyError) {
       setError(readyError.message);
+      return;
+    }
+    load();
+  }
+
+  async function requestRider(orderId: string) {
+    setBusyId(orderId);
+    setError(null);
+    const { error: requestError } = await supabase
+      .from("delivery_requests")
+      .insert({ order_id: orderId, kitchen_id: kitchenId });
+    setBusyId(null);
+    if (requestError) {
+      setError(requestError.message);
       return;
     }
     load();
@@ -242,11 +261,38 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
                     {busyId === o.id ? "Saving…" : "Mark Ready — Looking for Rider"}
                   </button>
                 )}
-                {o.preparation_status === "ready" && (
-                  <p className="mt-3 text-center text-sm font-semibold" style={{ color: "var(--kb-ink-soft)" }}>
-                    Ready — looking for rider
-                  </p>
-                )}
+                {o.preparation_status === "ready" && (() => {
+                  const requests = o.delivery_requests ?? [];
+                  const active = requests.find((r) => r.status === "open" || r.status === "accepted");
+                  const delivered = requests.some((r) => r.status === "completed");
+
+                  if (active) {
+                    return (
+                      <p className="mt-3 text-center text-sm font-semibold" style={{ color: active.status === "accepted" ? "var(--kb-green-deep)" : "var(--kb-ink-soft)" }}>
+                        {active.status === "accepted" ? "Rider assigned" : "Waiting for a rider"}
+                      </p>
+                    );
+                  }
+
+                  if (delivered) {
+                    return (
+                      <p className="mt-3 text-center text-sm font-semibold" style={{ color: "var(--kb-green-deep)" }}>
+                        Delivered
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <button
+                      onClick={() => requestRider(o.id)}
+                      disabled={busyId === o.id}
+                      className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                      style={{ background: "var(--kb-purple)" }}
+                    >
+                      {busyId === o.id ? "Saving…" : "Request a rider"}
+                    </button>
+                  );
+                })()}
               </div>
             ))}
           </div>
