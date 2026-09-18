@@ -846,3 +846,37 @@ create policy "Admins can update every delivery request"
 -- ----------------------------------------------------------------------------
 alter table public.kitchens add column if not exists latitude numeric(9,6);
 alter table public.kitchens add column if not exists longitude numeric(9,6);
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Order cancellation + delivery release
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 20. ORDER CANCELLATION (customer-facing, Customer app)
+-- Widens order_status to allow a customer to cancel their own order while
+-- it's still 'placed' — the Customer app's cancelOrder() action includes
+-- `order_status = 'placed'` in its update's WHERE clause (same "current
+-- state in the WHERE clause" pattern as accept/reject/preparation above),
+-- with an RLS policy on the Customer app's own copy of this script as the
+-- server-side backstop. ready_at is this repo's side of the same change:
+-- set by markReady() below, alongside decided_at/paid_at, so the Customer
+-- app's order-status timeline has a timestamp for the "ready" stage.
+-- ----------------------------------------------------------------------------
+alter table public.orders drop constraint if exists orders_order_status_check;
+alter table public.orders add constraint orders_order_status_check
+  check (order_status in ('placed', 'accepted', 'rejected', 'cancelled'));
+
+alter table public.orders add column if not exists ready_at timestamptz; -- set when preparation_status moves to 'ready'
+
+-- ----------------------------------------------------------------------------
+-- 21. DELIVERY RELEASE
+-- A rider who accepted a delivery can back out before completing it — the
+-- request goes to 'release_requested' (not straight back to 'open') so the
+-- cook is aware a rider dropped it before another rider can pick it up.
+-- ----------------------------------------------------------------------------
+alter table public.delivery_requests drop constraint if exists delivery_requests_status_check;
+alter table public.delivery_requests add constraint delivery_requests_status_check
+  check (status in ('open', 'accepted', 'completed', 'cancelled', 'release_requested'));

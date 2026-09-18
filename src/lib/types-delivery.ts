@@ -6,7 +6,7 @@
  * pickup_requests.
  */
 
-export type DeliveryRequestStatus = "open" | "accepted" | "completed" | "cancelled";
+export type DeliveryRequestStatus = "open" | "accepted" | "completed" | "cancelled" | "release_requested";
 
 export interface DeliveryRequest {
   id: string;

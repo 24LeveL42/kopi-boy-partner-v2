@@ -9,7 +9,7 @@
  * combined enum — never collapse them back into a single status.
  */
 
-export type OrderStatus = "placed" | "accepted" | "rejected";
+export type OrderStatus = "placed" | "accepted" | "rejected" | "cancelled";
 export type PaymentStatus = "unpaid" | "paid";
 export type PreparationStatus = "not_started" | "preparing" | "ready";
 
@@ -32,6 +32,7 @@ export interface Order {
   subtotal: number;
   decided_at: string | null;
   paid_at: string | null;
+  ready_at: string | null;
   created_at: string;
 }
 

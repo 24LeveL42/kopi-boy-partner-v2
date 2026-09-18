@@ -114,7 +114,7 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
     setError(null);
     const { error: readyError } = await supabase
       .from("orders")
-      .update({ preparation_status: "ready" })
+      .update({ preparation_status: "ready", ready_at: new Date().toISOString() })
       .eq("id", orderId)
       .eq("order_status", "accepted")
       .eq("preparation_status", "preparing"); // can't skip straight from not_started / twice
