@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PartnerRole } from "@/lib/types";
+import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
 
 export function ApplyForm({ userId }: { userId: string }) {
@@ -30,6 +31,9 @@ export function ApplyForm({ userId }: { userId: string }) {
 
   // Picker fields
   const [pickerNote, setPickerNote] = useState("");
+
+  // Global Back steps from a role's form to the role picker.
+  useBackHandler(roleChoice ? () => setRoleChoice(null) : null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -96,7 +100,7 @@ export function ApplyForm({ userId }: { userId: string }) {
 
   if (!roleChoice) {
     return (
-      <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6" style={{ background: "var(--kb-navy)" }}>
+      <div className="mx-auto flex min-h-page max-w-sm flex-col justify-center px-6" style={{ background: "var(--kb-navy)" }}>
         <div className="mb-6 flex justify-center">
           <Logo size={48} />
         </div>
@@ -134,11 +138,8 @@ export function ApplyForm({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-sm px-6 py-10" style={{ background: "var(--kb-navy)" }}>
-      <button onClick={() => setRoleChoice(null)} className="text-sm" style={{ color: "var(--kb-green)" }}>
-        &larr; Back
-      </button>
-      <h1 className="mt-4 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
+    <div className="mx-auto min-h-page max-w-sm px-6 py-10" style={{ background: "var(--kb-navy)" }}>
+      <h1 className="font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
         {roleChoice === "cook" ? "Cook application" : roleChoice === "rider" ? "Rider application" : "Picker application"}
       </h1>
 

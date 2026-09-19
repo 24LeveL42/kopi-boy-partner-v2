@@ -33,6 +33,10 @@
   --kb-warn: #F59E0B;
   --kb-danger: #EF4444;
 
+  /* Height of the global Home/Back bar (AppChrome). Pages use `min-h-page`
+     instead of `min-h-screen` so bar + page still fit one viewport. */
+  --app-bar-h: 3rem;
+
   /* Category tile colors (customer marketplace reference design) */
   --kb-cat-homecook-bg: #EDE3FB;
   --kb-cat-homecook-fg: #7C3AED;
@@ -70,6 +74,10 @@
   --color-kb-danger: var(--kb-danger);
   --font-display: var(--font-display);
   --font-body: var(--font-body);
+}
+
+@utility min-h-page {
+  min-height: calc(100dvh - var(--app-bar-h));
 }
 
 * {

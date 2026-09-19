@@ -242,7 +242,7 @@ export function KitchenSetupForm({
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-md px-5 py-8" style={{ background: "var(--kb-navy)" }}>
+    <div className="mx-auto min-h-page max-w-md px-5 py-8" style={{ background: "var(--kb-navy)" }}>
       <div className="mb-6 flex justify-center">
         <Logo size={48} />
       </div>

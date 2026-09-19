@@ -112,7 +112,7 @@ export function PickerShell({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-md px-5 py-6" style={{ background: "var(--kb-navy)" }}>
+    <div className="mx-auto min-h-page max-w-md px-5 py-6" style={{ background: "var(--kb-navy)" }}>
       <TopBar badge="Picker" />
 
       <h1 className="mt-4 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>

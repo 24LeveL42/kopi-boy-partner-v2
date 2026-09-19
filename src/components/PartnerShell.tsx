@@ -11,7 +11,7 @@ import { RiderDeliveriesPanel } from "./RiderDeliveriesPanel";
  */
 export function PartnerShell({ userId, defaultView }: { userId: string; defaultView: "cook" | "rider" }) {
   return (
-    <div className="min-h-screen pb-24" style={{ background: "var(--kb-navy)" }}>
+    <div className="min-h-page pb-24" style={{ background: "var(--kb-navy)" }}>
       <div className="mx-auto max-w-md px-4 pt-4 sm:max-w-lg sm:px-6">
         <TopBar />
       </div>

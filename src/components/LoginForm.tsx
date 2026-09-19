@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
 
 type Step = "choice" | "enter-phone" | "enter-code";
@@ -16,19 +17,37 @@ type Intent = "signup" | "signin";
  */
 const SG_PREFIX = "+65";
 
-export function LoginForm() {
+export function LoginForm({ initialError = null }: { initialError?: string | null }) {
   const [step, setStep] = useState<Step>("choice");
   const [intent, setIntent] = useState<Intent>("signin");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const supabase = createClient();
   const router = useRouter();
 
   const fullPhone = `${SG_PREFIX}${phone.replace(/\D/g, "")}`;
+
+  // Global Back steps back through the flow: code -> phone -> Sign in / Sign up choice.
+  useBackHandler(
+    step === "enter-code"
+      ? () => setStep("enter-phone")
+      : step === "enter-phone"
+        ? () => {
+            setStep("choice");
+            setError(null);
+          }
+        : null,
+  );
+
+  function chooseIntent(next: Intent) {
+    setIntent(next);
+    setError(null);
+    if (step === "choice") setStep("enter-phone");
+  }
 
   async function handleGoogleSignIn() {
     setGoogleLoading(true);
@@ -48,10 +67,20 @@ export function LoginForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithOtp({ phone: fullPhone });
+    // Sign in only works for an existing account; only Sign up may create one.
+    // Without this, a mistyped number on "Sign in" would silently create a
+    // brand-new account instead of telling the user.
+    const { error } = await supabase.auth.signInWithOtp({
+      phone: fullPhone,
+      options: { shouldCreateUser: intent === "signup" },
+    });
     setLoading(false);
     if (error) {
-      setError(error.message);
+      if (intent === "signin" && (error.code === "otp_disabled" || /signups? not allowed/i.test(error.message))) {
+        setError("We couldn't find an account for that number. Check the number, or tap Sign up if you're new.");
+      } else {
+        setError(error.message);
+      }
       return;
     }
     setStep("enter-code");
@@ -72,7 +101,7 @@ export function LoginForm() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6" style={{ background: "var(--kb-navy)" }}>
+    <div className="mx-auto flex min-h-page max-w-sm flex-col justify-center px-6" style={{ background: "var(--kb-navy)" }}>
       <div className="mb-8 flex justify-center">
         <Logo size={56} />
       </div>
@@ -83,33 +112,62 @@ export function LoginForm() {
             Kopi Boy Partners
           </h1>
           <p className="mb-3 text-center text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
-            New to Kopi Boy, or already a partner?
+            Cook, deliver or pick up with Kopi Boy.
           </p>
           <button
-            onClick={() => {
-              setIntent("signup");
-              setStep("enter-phone");
-            }}
-            className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white"
-            style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
-          >
-            Sign up as a new partner
-          </button>
-          <button
-            onClick={() => {
-              setIntent("signin");
-              setStep("enter-phone");
-            }}
-            className="w-full rounded-2xl bg-white py-3.5 text-[15px] font-semibold shadow-lg"
+            onClick={() => chooseIntent("signin")}
+            className="w-full rounded-2xl bg-white px-5 py-3.5 text-left shadow-lg"
             style={{ color: "var(--kb-ink)" }}
           >
-            Sign in
+            <span className="block text-[15px] font-semibold">Sign in</span>
+            <span className="block text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+              I already have an account
+            </span>
+          </button>
+          <button
+            onClick={() => chooseIntent("signup")}
+            className="w-full rounded-2xl px-5 py-3.5 text-left text-white"
+            style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
+          >
+            <span className="block text-[15px] font-semibold">Sign up</span>
+            <span className="block text-xs opacity-90">I&apos;m new — create a partner account</span>
           </button>
         </div>
       ) : (
         <>
-          <p className="mb-5 text-center text-sm font-semibold" style={{ color: "var(--kb-on-navy-soft)" }}>
-            {intent === "signup" ? "Join as a partner" : "Welcome back"}
+          {step === "enter-phone" && (
+            <div
+              role="group"
+              aria-label="Sign in or sign up"
+              className="mb-5 grid grid-cols-2 gap-1 rounded-2xl p-1"
+              style={{ background: "var(--kb-navy-raised)" }}
+            >
+              {(["signin", "signup"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={intent === option}
+                  onClick={() => chooseIntent(option)}
+                  className="rounded-xl py-2 text-sm font-semibold"
+                  style={
+                    intent === option
+                      ? { background: "white", color: "var(--kb-ink)" }
+                      : { color: "var(--kb-on-navy-soft)" }
+                  }
+                >
+                  {option === "signin" ? "Sign in" : "Sign up"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <h1 className="text-center font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
+            {intent === "signup" ? "Create your partner account" : "Welcome back"}
+          </h1>
+          <p className="mb-5 mt-1 text-center text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
+            {intent === "signup"
+              ? "New to Kopi Boy? Sign up with Google or your mobile number."
+              : "Sign in with the Google account or mobile number you used before."}
           </p>
 
           <button
@@ -119,7 +177,7 @@ export function LoginForm() {
             style={{ color: "var(--kb-ink)" }}
           >
             <GoogleIcon />
-            {googleLoading ? "Redirecting…" : "Continue with Google"}
+            {googleLoading ? "Redirecting…" : intent === "signup" ? "Sign up with Google" : "Sign in with Google"}
           </button>
 
           <div className="my-5 flex items-center gap-3">
@@ -153,16 +211,19 @@ export function LoginForm() {
                 className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
                 style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
               >
-                {loading ? "Sending code…" : "Send login code"}
+                {loading ? "Sending code…" : intent === "signup" ? "Send sign-up code" : "Send sign-in code"}
               </button>
-              <button
-                type="button"
-                onClick={() => setStep("choice")}
-                className="w-full text-center text-sm"
-                style={{ color: "var(--kb-on-navy-soft)" }}
-              >
-                &larr; Back
-              </button>
+              <p className="pt-1 text-center text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
+                {intent === "signin" ? "New to Kopi Boy? " : "Already have an account? "}
+                <button
+                  type="button"
+                  onClick={() => chooseIntent(intent === "signin" ? "signup" : "signin")}
+                  className="font-semibold underline"
+                  style={{ color: "var(--kb-green)" }}
+                >
+                  {intent === "signin" ? "Sign up" : "Sign in"}
+                </button>
+              </p>
             </form>
           ) : (
             <form onSubmit={handleVerifyCode} className="space-y-3">

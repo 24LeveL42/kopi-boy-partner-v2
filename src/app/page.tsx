@@ -5,6 +5,7 @@ import { StatusScreen } from "@/components/StatusScreen";
 import { PartnerShell } from "@/components/PartnerShell";
 import { KitchenSetupForm } from "@/components/KitchenSetupForm";
 import { PickerShell } from "@/components/PickerShell";
+import { resolvePartnerScreen } from "@/lib/partner-routing";
 import type { Profile, CookApplication, RiderApplication, PickerApplication } from "@/lib/types-auth";
 import type { Kitchen } from "@/lib/types-kitchen";
 
@@ -18,15 +19,38 @@ export default async function Home() {
     return <LoginForm />;
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single<Profile>();
+  const [{ data: profile }, { data: cookApp }, { data: riderApp }, { data: pickerApp }, { data: kitchen }] =
+    await Promise.all([
+      supabase.from("profiles").select("*").eq("id", user.id).single<Profile>(),
+      supabase
+        .from("cook_applications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<CookApplication>(),
+      supabase
+        .from("rider_applications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<RiderApplication>(),
+      supabase
+        .from("picker_applications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<PickerApplication>(),
+      supabase.from("kitchens").select("*").eq("id", user.id).maybeSingle<Kitchen>(),
+    ]);
 
-  // Approved and active partner — show the real cook/rider/picker shell.
-  if (profile && (profile.role === "cook" || profile.role === "rider" || profile.role === "picker")) {
-    if (!profile.is_active) {
+  // All routing decisions live in resolvePartnerScreen (unit-checkable, no DB).
+  const screen = resolvePartnerScreen({ profile, cookApp, riderApp, pickerApp, kitchen });
+
+  switch (screen.kind) {
+    case "blocked":
       return (
         <StatusScreen
           tone="danger"
@@ -34,134 +58,29 @@ export default async function Home() {
           message="Your partner account has been temporarily blocked. Contact Kopi Boy support for details."
         />
       );
-    }
-
-    // Cooks must set up their kitchen (mandatory menu + at least one price)
-    // before they appear in the Customer app — Feature #003.
-    if (profile.role === "cook") {
-      const { data: kitchen } = await supabase
-        .from("kitchens")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle<Kitchen>();
-
-      if (!kitchen) {
-        const { data: application } = await supabase
-          .from("cook_applications")
-          .select("*")
-          .eq("user_id", user.id)
-          .eq("status", "approved")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle<CookApplication>();
-
-        return (
-          <KitchenSetupForm
-            userId={user.id}
-            defaults={{
-              business_name: application?.business_name ?? "",
-              neighbourhood: application?.neighbourhood ?? "",
-              description: application?.description ?? "",
-            }}
-          />
-        );
-      }
-    }
-
-    if (profile.role === "picker") {
-      return <PickerShell userId={user.id} />;
-    }
-
-    return <PartnerShell userId={user.id} defaultView={profile.role} />;
-  }
-
-  // Not yet a cook/rider/picker — check for an existing application.
-  const [{ data: cookApp }, { data: riderApp }, { data: pickerApp }] = await Promise.all([
-    supabase
-      .from("cook_applications")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<CookApplication>(),
-    supabase
-      .from("rider_applications")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<RiderApplication>(),
-    supabase
-      .from("picker_applications")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<PickerApplication>(),
-  ]);
-
-  const latestApp = [cookApp, riderApp, pickerApp]
-    .filter(Boolean)
-    .sort((a, b) => new Date(b!.created_at).getTime() - new Date(a!.created_at).getTime())[0];
-
-  if (latestApp?.status === "pending") {
-    return (
-      <StatusScreen
-        tone="warning"
-        title="Application under review"
-        message="Thanks for applying! Kopi Boy HQ is reviewing your application — we'll let you know once it's approved."
-      />
-    );
-  }
-
-  if (latestApp?.status === "rejected") {
-    return (
-      <StatusScreen
-        tone="danger"
-        title="Application not approved"
-        message="Your application wasn't approved this time. Contact Kopi Boy support if you'd like to know more or reapply."
-      />
-    );
-  }
-
-  // Approved, but profile.role hasn't caught up yet (e.g. HQ approved the
-  // application row without also promoting the profile) — route straight
-  // into the real partner flow instead of back through the sign-up form.
-  if (latestApp?.status === "approved") {
-    if (latestApp === cookApp) {
-      // Same "already set up?" check as the profile.role === "cook" branch
-      // above — without it, an approved cook whose role hasn't been
-      // promoted yet gets sent back to Kitchen Setup forever, even after
-      // successfully saving a kitchen.
-      const { data: kitchen } = await supabase
-        .from("kitchens")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle<Kitchen>();
-
-      if (kitchen) {
-        return <PartnerShell userId={user.id} defaultView="cook" />;
-      }
-
+    case "application-pending":
       return (
-        <KitchenSetupForm
-          userId={user.id}
-          defaults={{
-            business_name: cookApp.business_name,
-            neighbourhood: cookApp.neighbourhood ?? "",
-            description: cookApp.description ?? "",
-          }}
+        <StatusScreen
+          tone="warning"
+          title="Application under review"
+          message="Thanks for applying! Kopi Boy HQ is reviewing your application — we'll let you know once it's approved."
         />
       );
-    }
-    if (latestApp === riderApp) {
-      return <PartnerShell userId={user.id} defaultView="rider" />;
-    }
-    if (latestApp === pickerApp) {
+    case "application-rejected":
+      return (
+        <StatusScreen
+          tone="danger"
+          title="Application not approved"
+          message="Your application wasn't approved this time. Contact Kopi Boy support if you'd like to know more or reapply."
+        />
+      );
+    case "kitchen-setup":
+      return <KitchenSetupForm userId={user.id} defaults={screen.defaults} />;
+    case "partner-shell":
+      return <PartnerShell userId={user.id} defaultView={screen.view} />;
+    case "picker-shell":
       return <PickerShell userId={user.id} />;
-    }
+    case "apply":
+      return <ApplyForm userId={user.id} />;
   }
-
-  // No application yet — show the sign-up form.
-  return <ApplyForm userId={user.id} />;
 }

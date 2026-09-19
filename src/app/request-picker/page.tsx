@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { RequestPickerForm } from "@/components/RequestPickerForm";
 import { TopBar } from "@/components/TopBar";
@@ -60,12 +59,9 @@ export default async function RequestPickerPage() {
   }));
 
   return (
-    <div className="mx-auto min-h-screen max-w-md px-5 py-6" style={{ background: "var(--kb-navy)" }}>
+    <div className="mx-auto min-h-page max-w-md px-5 py-6" style={{ background: "var(--kb-navy)" }}>
       <TopBar />
-      <Link href="/" className="mt-4 inline-block text-sm" style={{ color: "var(--kb-green)" }}>
-        &larr; Back
-      </Link>
-      <h1 className="mt-2 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
+      <h1 className="mt-4 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
         Request a picker
       </h1>
       <p className="mt-1 text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>

@@ -13,7 +13,7 @@ export function StatusScreen({
     tone === "danger" ? "var(--kb-danger)" : tone === "warning" ? "var(--kb-warn)" : "var(--kb-green)";
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center px-6 text-center" style={{ background: "var(--kb-navy)" }}>
+    <div className="mx-auto flex min-h-page max-w-sm flex-col items-center justify-center px-6 text-center" style={{ background: "var(--kb-navy)" }}>
       <Logo size={48} />
       <div className="mt-6 h-1 w-12 rounded-full" style={{ background: accent }} />
       <h1 className="mt-5 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
