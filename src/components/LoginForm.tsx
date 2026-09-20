@@ -44,8 +44,15 @@ export function LoginForm({ initialError = null }: { initialError?: string | nul
   );
 
   function chooseIntent(next: Intent) {
-    setIntent(next);
     setError(null);
+    if (step === "enter-code") {
+      // A code already sent was issued for the other intent (sign in never
+      // creates an account, sign up may) — switching means sending a new one.
+      if (next === intent) return;
+      setCode("");
+      setStep("enter-phone");
+    }
+    setIntent(next);
     if (step === "choice") setStep("enter-phone");
   }
 
@@ -135,31 +142,31 @@ export function LoginForm({ initialError = null }: { initialError?: string | nul
         </div>
       ) : (
         <>
-          {step === "enter-phone" && (
-            <div
-              role="group"
-              aria-label="Sign in or sign up"
-              className="mb-5 grid grid-cols-2 gap-1 rounded-2xl p-1"
-              style={{ background: "var(--kb-navy-raised)" }}
-            >
-              {(["signin", "signup"] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  aria-pressed={intent === option}
-                  onClick={() => chooseIntent(option)}
-                  className="rounded-xl py-2 text-sm font-semibold"
-                  style={
-                    intent === option
-                      ? { background: "white", color: "var(--kb-ink)" }
-                      : { color: "var(--kb-on-navy-soft)" }
-                  }
-                >
-                  {option === "signin" ? "Sign in" : "Sign up"}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Both options stay on screen for every step of the flow. */}
+          <div
+            role="group"
+            aria-label="Sign in or sign up"
+            className="mb-5 grid grid-cols-2 gap-1 rounded-2xl p-1"
+            style={{ background: "var(--kb-navy-raised)" }}
+          >
+            {(["signin", "signup"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={intent === option}
+                onClick={() => chooseIntent(option)}
+                className="rounded-xl py-2 text-sm font-semibold"
+                style={
+                  intent === option
+                    ? { background: "white", color: "var(--kb-ink)" }
+                    : { color: "var(--kb-on-navy-soft)" }
+                }
+              >
+                {option === "signin" ? "Sign in" : "Sign up"}
+              </button>
+            ))}
+          </div>
+
 
           <h1 className="text-center font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
             {intent === "signup" ? "Create your partner account" : "Welcome back"}

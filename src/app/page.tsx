@@ -54,6 +54,7 @@ export default async function Home() {
       return (
         <StatusScreen
           tone="danger"
+          signOut
           title="Account temporarily blocked"
           message="Your partner account has been temporarily blocked. Contact Kopi Boy support for details."
         />
@@ -62,6 +63,7 @@ export default async function Home() {
       return (
         <StatusScreen
           tone="warning"
+          signOut
           title="Application under review"
           message="Thanks for applying! Kopi Boy HQ is reviewing your application — we'll let you know once it's approved."
         />
@@ -70,6 +72,7 @@ export default async function Home() {
       return (
         <StatusScreen
           tone="danger"
+          signOut
           title="Application not approved"
           message="Your application wasn't approved this time. Contact Kopi Boy support if you'd like to know more or reapply."
         />

@@ -1,13 +1,19 @@
 import { Logo } from "./Logo";
+import { SignOutButton } from "./SignOutButton";
 
 export function StatusScreen({
   title,
   message,
   tone = "neutral",
+  signOut = false,
+  children,
 }: {
   title: string;
   message: string;
   tone?: "neutral" | "warning" | "danger";
+  /** Offer Sign out — for signed-in dead ends (pending / rejected / blocked), so a wrong account isn't a trap. */
+  signOut?: boolean;
+  children?: React.ReactNode;
 }) {
   const accent =
     tone === "danger" ? "var(--kb-danger)" : tone === "warning" ? "var(--kb-warn)" : "var(--kb-green)";
@@ -22,6 +28,12 @@ export function StatusScreen({
       <p className="mt-2 text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
         {message}
       </p>
+      {children && <div className="mt-6 w-full">{children}</div>}
+      {signOut && (
+        <div className="mt-6 w-full">
+          <SignOutButton />
+        </div>
+      )}
     </div>
   );
 }

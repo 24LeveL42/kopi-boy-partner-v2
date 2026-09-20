@@ -32,10 +32,16 @@ export function useBackHandler(handler: BackHandler | null) {
 }
 
 /**
- * The single, app-wide Home + Back bar. Mounted once in the root layout, so
- * every route (and every screen `/` can render) gets it — pages never add
- * their own. Fixed to the top; content is offset by --app-bar-h (see
- * globals.css, `min-h-page`).
+ * The single, app-wide Back / Cancel / Home bar. Mounted once in the root
+ * layout, so every route (and every screen `/` can render) gets it — pages
+ * never add their own. Fixed to the top; content is offset by --app-bar-h
+ * (see globals.css, `min-h-page`).
+ *
+ * - Back: one step back — a screen's own step (via useBackHandler), else the
+ *   previous in-app page, else Home.
+ * - Cancel: abandon what you're doing and discard unsaved input — leaves the
+ *   page for Home, or, when already on Home, resets the screen to its start.
+ * - Home: go to Home (on Home it also resets the screen's steps).
  */
 export function AppChrome({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -46,13 +52,12 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   const [homeKey, setHomeKey] = useState(0);
   // True once this tab has navigated inside the app, so router.back() is
   // known to stay in-app (history.length also counts pages before the app,
-  // e.g. the Google sign-in redirect).
-  const hasInAppHistory = useRef(false);
-  const firstPath = useRef(pathname);
-
-  useEffect(() => {
-    if (pathname !== firstPath.current) hasInAppHistory.current = true;
-  }, [pathname]);
+  // e.g. the Google sign-in redirect). State (not a ref) because it drives
+  // whether Back is disabled; set during render, which React allows for
+  // state derived from props/hooks.
+  const [firstPath] = useState(pathname);
+  const [hasInAppHistory, setHasInAppHistory] = useState(false);
+  if (!hasInAppHistory && pathname !== firstPath) setHasInAppHistory(true);
 
   const register = useCallback((handler: BackHandler | null) => {
     setOverride(() => handler);
@@ -60,16 +65,32 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   const ctx = useMemo(() => ({ register }), [register]);
 
   const onHome = pathname === "/";
-  // On the home route with nothing to step back through, there's nowhere to go.
-  const backDisabled = onHome && !override;
+  // Only the very first screen of a visit has nowhere to go back to: on Home
+  // with no step to unwind and no in-app page behind it.
+  const backDisabled = onHome && !override && !hasInAppHistory;
 
   function handleBack() {
     if (override) {
       override();
-    } else if (hasInAppHistory.current) {
+    } else if (hasInAppHistory) {
       router.back();
     } else {
       router.push("/");
+    }
+  }
+
+  // Remounting the page subtree resets any in-page state (login step, apply
+  // role picker, half-filled forms) to its initial value.
+  function resetScreen() {
+    setHomeKey((k) => k + 1);
+  }
+
+  function handleCancel() {
+    if (onHome) {
+      resetScreen();
+      router.refresh(); // also re-fetch server data, so nothing stale survives the cancel
+    } else {
+      router.push("/"); // leaving unmounts the page, discarding its unsaved input
     }
   }
 
@@ -81,14 +102,14 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
       >
         <nav
           aria-label="Page navigation"
-          className="mx-auto flex h-full max-w-md items-center justify-between px-4 sm:max-w-lg sm:px-6"
+          className="mx-auto grid h-full max-w-md grid-cols-3 items-center px-4 sm:max-w-lg sm:px-6"
         >
           <button
             type="button"
             onClick={handleBack}
             disabled={backDisabled}
             aria-label="Go back"
-            className="flex items-center gap-1.5 rounded-full py-1.5 pl-2 pr-3 text-sm font-semibold disabled:opacity-35"
+            className="flex items-center gap-1.5 justify-self-start rounded-full py-1.5 pl-2 pr-3 text-sm font-semibold disabled:opacity-35"
             style={{ color: "var(--kb-on-navy)" }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -97,14 +118,28 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
             Back
           </button>
 
+          <button
+            type="button"
+            onClick={handleCancel}
+            aria-label="Cancel and discard changes"
+            className="flex items-center gap-1.5 justify-self-center rounded-full px-3 py-1.5 text-sm font-semibold"
+            style={{ color: "var(--kb-on-navy)" }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="6" x2="6" y2="18" />
+            </svg>
+            Cancel
+          </button>
+
           <Link
             href="/"
             onClick={() => {
-              if (onHome) setHomeKey((k) => k + 1);
+              if (onHome) resetScreen();
             }}
             aria-label="Go to home"
             aria-current={onHome ? "page" : undefined}
-            className="flex items-center gap-1.5 rounded-full py-1.5 pl-3 pr-2 text-sm font-semibold"
+            className="flex items-center gap-1.5 justify-self-end rounded-full py-1.5 pl-3 pr-2 text-sm font-semibold"
             style={{ color: onHome ? "var(--kb-green)" : "var(--kb-on-navy)" }}
           >
             Home

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { PartnerRole } from "@/lib/types";
 import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
+import { SignOutButton } from "./SignOutButton";
 
 export function ApplyForm({ userId }: { userId: string }) {
   const [roleChoice, setRoleChoice] = useState<PartnerRole | null>(null);
@@ -133,6 +134,10 @@ export function ApplyForm({ userId }: { userId: string }) {
             <span className="text-sm" style={{ color: "var(--kb-ink-soft)" }}>Casual — collect an order from a cook and hand it to a rider nearby</span>
           </button>
         </div>
+        <p className="mb-2 mt-6 text-center text-xs" style={{ color: "var(--kb-on-navy-soft)" }}>
+          Wrong account?
+        </p>
+        <SignOutButton />
       </div>
     );
   }
