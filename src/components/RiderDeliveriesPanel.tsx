@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
 import type { DeliveryRequestWithKitchen } from "@/lib/types-delivery";
 
 interface RawRow {
@@ -43,8 +44,9 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `silent` = live refresh: update in place without flashing the loading state.
+  const load = useCallback(async (silent?: boolean) => {
+    if (silent !== true) setLoading(true);
     setError(null);
 
     const { data: mine, error: mineError } = await supabase
@@ -89,9 +91,12 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
   useEffect(() => {
     // Deferred so the initial setLoading(true) inside load() doesn't run
     // synchronously as part of the effect's own commit.
-    const timer = setTimeout(load, 0);
+    const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  // Open requests are visible to every rider (RLS scopes it), so no filter.
+  useLiveRefresh([{ table: "delivery_requests" }], () => void load(true));
 
   async function accept(requestId: string) {
     setBusyId(requestId);
@@ -184,7 +189,7 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
           )}
 
           <button
-            onClick={load}
+            onClick={() => void load()}
             className="mt-3 w-full rounded-2xl py-2.5 text-sm font-semibold"
             style={{ background: "var(--kb-navy-raised)", color: "var(--kb-on-navy)" }}
           >

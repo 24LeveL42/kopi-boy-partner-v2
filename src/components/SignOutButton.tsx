@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { removeDeviceSubscription } from "@/lib/push-client";
 
 export function SignOutButton({ onlyWhenSignedIn = false }: { onlyWhenSignedIn?: boolean }) {
   const supabase = createClient();
@@ -25,6 +26,9 @@ export function SignOutButton({ onlyWhenSignedIn = false }: { onlyWhenSignedIn?:
   }, [onlyWhenSignedIn]);
 
   async function handleSignOut() {
+    // While still signed in, so the RPC is authorised: stop this device
+    // receiving the outgoing account's push alerts.
+    await removeDeviceSubscription(supabase);
     await supabase.auth.signOut();
     router.push("/");
     router.refresh();

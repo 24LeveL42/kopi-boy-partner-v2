@@ -4,14 +4,16 @@ import { useState } from "react";
 import Link from "next/link";
 import { Logo } from "./Logo";
 import { SignOutButton } from "./SignOutButton";
+import { useNotifications } from "./NotificationsProvider";
 
 /**
- * The hamburger button + slide-in drawer (Home, My Profile, Sign out). Shared
- * by every signed-in screen that has a header, so Sign out is always one tap
- * away from the menu.
+ * The hamburger button + slide-in drawer (Home, Notifications, My Profile,
+ * Sign out). Shared by every signed-in screen that has a header, so Sign out
+ * is always one tap away from the menu.
  */
 export function PartnerMenu() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { unreadCount } = useNotifications();
 
   return (
     <>
@@ -64,6 +66,22 @@ export function PartnerMenu() {
                 style={{ color: "var(--kb-on-navy)" }}
               >
                 Home
+              </Link>
+              <Link
+                href="/notifications"
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium"
+                style={{ color: "var(--kb-on-navy)" }}
+              >
+                Notifications
+                {unreadCount > 0 && (
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white"
+                    style={{ background: "var(--kb-danger)" }}
+                  >
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
               </Link>
               <Link
                 href="/account"

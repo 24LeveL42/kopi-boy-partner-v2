@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { RequestPickerForm } from "@/components/RequestPickerForm";
 import { TopBar } from "@/components/TopBar";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import type { Profile } from "@/lib/types-auth";
 import type { PickupRequestWithKitchen } from "@/lib/types-picker";
 
@@ -61,6 +62,7 @@ export default async function RequestPickerPage() {
   return (
     <div className="mx-auto min-h-page max-w-md px-5 py-6" style={{ background: "var(--kb-navy)" }}>
       <TopBar />
+      <LiveRefresh sources={[{ table: "pickup_requests", filter: `rider_id=eq.${user.id}` }]} />
       <h1 className="mt-4 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
         Request a picker
       </h1>

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppChrome } from "@/components/AppChrome";
+import { NotificationsProvider } from "@/components/NotificationsProvider";
 
 export const metadata: Metadata = {
   title: "Kopi Boy Partner",
@@ -18,7 +19,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <AppChrome>{children}</AppChrome>
+        <NotificationsProvider>
+          <AppChrome>{children}</AppChrome>
+        </NotificationsProvider>
       </body>
     </html>
   );

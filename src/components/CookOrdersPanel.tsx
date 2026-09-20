@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
 import type { OrderWithItems } from "@/lib/types-orders";
 import type { DeliveryRequest } from "@/lib/types-delivery";
 
@@ -28,8 +29,9 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `silent` = live refresh: update in place without flashing the loading state.
+  const load = useCallback(async (silent?: boolean) => {
+    if (silent !== true) setLoading(true);
 
     const { data, error: loadError } = await supabase
       .from("orders")
@@ -55,9 +57,17 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
   useEffect(() => {
     // Deferred so the initial setLoading(true) inside load() doesn't run
     // synchronously as part of the effect's own commit.
-    const timer = setTimeout(load, 0);
+    const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  useLiveRefresh(
+    [
+      { table: "orders", filter: `kitchen_id=eq.${kitchenId}` },
+      { table: "delivery_requests", filter: `kitchen_id=eq.${kitchenId}` },
+    ],
+    () => void load(true)
+  );
 
   async function decide(orderId: string, decision: "accepted" | "rejected") {
     setBusyId(orderId);
@@ -300,7 +310,7 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
       </section>
 
       <button
-        onClick={load}
+        onClick={() => void load()}
         className="w-full rounded-2xl py-2.5 text-sm font-semibold"
         style={{ background: "var(--kb-navy-raised)", color: "var(--kb-on-navy)" }}
       >
