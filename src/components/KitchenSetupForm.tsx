@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Logo } from "./Logo";
+import { PartnerMenu } from "./PartnerMenu";
+import { useBackHandler, useCancelHandler } from "./AppChrome";
 import type { Kitchen, MenuItem, MerchantCategory, CuisineType, PaynowType } from "@/lib/types-kitchen";
 
 const PAYNOW_TYPES: { id: PaynowType; label: string }[] = [
@@ -62,11 +64,14 @@ export function KitchenSetupForm({
   defaults,
   existingKitchen,
   existingItems,
+  onCancel,
 }: {
   userId: string;
   defaults: { business_name: string; neighbourhood: string; description: string };
   existingKitchen?: Kitchen | null;
   existingItems?: MenuItem[];
+  /** Where Cancel goes. Defaults to Home; first-time setup (which *is* Home) passes its own. */
+  onCancel?: () => void;
 }) {
   const isEdit = !!existingKitchen;
   const router = useRouter();
@@ -91,6 +96,29 @@ export function KitchenSetupForm({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set on the first edit of any field — decides whether leaving needs a
+  // "discard?" confirmation.
+  const [touched, setTouched] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  function leave() {
+    if (onCancel) onCancel();
+    else router.push("/");
+  }
+
+  // Cancel (in-form or the global bar) and Home both land here, so a
+  // half-filled form is never wiped or abandoned without asking.
+  function requestLeave() {
+    if (loading) return;
+    if (touched) setConfirmLeave(true);
+    else leave();
+  }
+
+  // First-time setup has no history behind it, so Back always means "leave
+  // setup"; when editing, Back stays the browser's Back until there are
+  // unsaved changes to protect.
+  useBackHandler(!isEdit || touched ? requestLeave : null);
+  useCancelHandler(requestLeave);
 
   // Uploads a cook-chosen file to the public kitchen-photos bucket under
   // this cook's own folder (required by the bucket's RLS policies — see
@@ -164,10 +192,12 @@ export function KitchenSetupForm({
   }
 
   function addItem() {
+    setTouched(true);
     setItems((prev) => [...prev, emptyItem()]);
   }
 
   function removeItem(key: string) {
+    setTouched(true);
     setItems((prev) => prev.filter((it) => it.key !== key));
   }
 
@@ -243,8 +273,10 @@ export function KitchenSetupForm({
 
   return (
     <div className="mx-auto min-h-page max-w-md px-5 py-8" style={{ background: "var(--kb-navy)" }}>
-      <div className="mb-6 flex justify-center">
+      <div className="mb-6 flex items-center justify-between">
+        <PartnerMenu />
         <Logo size={48} />
+        <span className="w-8" aria-hidden="true" /> {/* balances the menu button so the logo stays centred */}
       </div>
       <h1 className="text-center font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
         {isEdit ? "Manage your kitchen" : "Set up your kitchen"}
@@ -255,7 +287,7 @@ export function KitchenSetupForm({
           : "Add your menu to appear in the Customer app. A photo is optional, but at least one menu item with a price is required."}
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+      <form onSubmit={handleSubmit} onChange={() => setTouched(true)} className="mt-6 space-y-5">
         <section className="space-y-3 rounded-2xl bg-white p-4" style={{ color: "var(--kb-ink)" }}>
           <Field label="Business name">
             <input
@@ -460,7 +492,56 @@ export function KitchenSetupForm({
         >
           {loading ? "Saving…" : isEdit ? "Save changes" : "Go live"}
         </button>
+        <button
+          type="button"
+          onClick={requestLeave}
+          disabled={loading}
+          className="w-full rounded-2xl border py-3 text-[15px] font-semibold disabled:opacity-60"
+          style={{ borderColor: "var(--kb-navy-line)", color: "var(--kb-on-navy)" }}
+        >
+          {isEdit ? "Cancel" : "Cancel setup"}
+        </button>
       </form>
+
+      {confirmLeave && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6" role="alertdialog" aria-modal="true" aria-labelledby="leave-title">
+          <button
+            type="button"
+            aria-label="Keep editing"
+            onClick={() => setConfirmLeave(false)}
+            className="absolute inset-0 bg-black/60"
+          />
+          <div className="relative w-full max-w-sm rounded-2xl bg-white p-5" style={{ color: "var(--kb-ink)" }}>
+            <h2 id="leave-title" className="font-display text-base font-bold">
+              {isEdit ? "Discard your changes?" : "Cancel kitchen setup?"}
+            </h2>
+            <p className="mt-1 text-sm" style={{ color: "var(--kb-ink-soft)" }}>
+              {isEdit
+                ? "Your unsaved changes to the kitchen and menu will be lost."
+                : "What you've entered so far won't be saved. You can start setup again any time."}
+            </p>
+            <div className="mt-4 space-y-2">
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setConfirmLeave(false)}
+                className="w-full rounded-xl py-2.5 text-sm font-semibold text-white"
+                style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                onClick={leave}
+                className="w-full rounded-xl py-2.5 text-sm font-semibold"
+                style={{ background: "var(--kb-cream)" }}
+              >
+                {isEdit ? "Discard changes" : "Yes, cancel setup"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

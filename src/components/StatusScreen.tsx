@@ -11,8 +11,11 @@ export function StatusScreen({
   title: string;
   message: string;
   tone?: "neutral" | "warning" | "danger";
-  /** Offer Sign out — for signed-in dead ends (pending / rejected / blocked), so a wrong account isn't a trap. */
-  signOut?: boolean;
+  /**
+   * Offer Sign out — for signed-in dead ends (pending / rejected / blocked), so a wrong account isn't a trap.
+   * "if-signed-in" is for screens signed-out visitors can reach too (404, crash).
+   */
+  signOut?: boolean | "if-signed-in";
   children?: React.ReactNode;
 }) {
   const accent =
@@ -31,7 +34,7 @@ export function StatusScreen({
       {children && <div className="mt-6 w-full">{children}</div>}
       {signOut && (
         <div className="mt-6 w-full">
-          <SignOutButton />
+          <SignOutButton onlyWhenSignedIn={signOut === "if-signed-in"} />
         </div>
       )}
     </div>

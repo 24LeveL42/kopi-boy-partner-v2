@@ -6,15 +6,12 @@ import { usePathname, useRouter } from "next/navigation";
 
 type BackHandler = () => void;
 
-const BackContext = createContext<{ register: (handler: BackHandler | null) => void } | null>(null);
+const BackContext = createContext<{
+  registerBack: (handler: BackHandler | null) => void;
+  registerCancel: (handler: BackHandler | null) => void;
+} | null>(null);
 
-/**
- * Lets a screen with its own internal steps (e.g. the login flow, or the
- * apply form's role picker) take over the global Back button while it's
- * mounted, so Back steps within the screen instead of leaving it. Pass
- * `null` when there's no internal step to go back to.
- */
-export function useBackHandler(handler: BackHandler | null) {
+function useBarHandler(kind: "back" | "cancel", handler: BackHandler | null) {
   const ctx = useContext(BackContext);
   // Callers pass a fresh closure each render; keep the latest in a ref and
   // only (un)register when the handler appears/disappears, so the bar isn't
@@ -26,9 +23,30 @@ export function useBackHandler(handler: BackHandler | null) {
   const active = handler !== null;
   useEffect(() => {
     if (!active) return;
-    ctx?.register(() => latest.current?.());
-    return () => ctx?.register(null);
-  }, [ctx, active]);
+    const register = kind === "back" ? ctx?.registerBack : ctx?.registerCancel;
+    register?.(() => latest.current?.());
+    return () => register?.(null);
+  }, [ctx, active, kind]);
+}
+
+/**
+ * Lets a screen with its own internal steps (e.g. the login flow, or the
+ * apply form's role picker) take over the global Back button while it's
+ * mounted, so Back steps within the screen instead of leaving it. Pass
+ * `null` when there's no internal step to go back to.
+ */
+export function useBackHandler(handler: BackHandler | null) {
+  useBarHandler("back", handler);
+}
+
+/**
+ * Lets a screen holding unsaved work take over the global Cancel and Home
+ * buttons while it's mounted (e.g. to ask "discard changes?" first), instead
+ * of the bar silently resetting or leaving the screen. Pass `null` to hand
+ * them back.
+ */
+export function useCancelHandler(handler: BackHandler | null) {
+  useBarHandler("cancel", handler);
 }
 
 /**
@@ -42,11 +60,14 @@ export function useBackHandler(handler: BackHandler | null) {
  * - Cancel: abandon what you're doing and discard unsaved input — leaves the
  *   page for Home, or, when already on Home, resets the screen to its start.
  * - Home: go to Home (on Home it also resets the screen's steps).
+ * - A screen holding unsaved work can take over Cancel and Home via
+ *   useCancelHandler, so neither silently wipes it.
  */
 export function AppChrome({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [override, setOverride] = useState<BackHandler | null>(null);
+  const [cancelOverride, setCancelOverride] = useState<BackHandler | null>(null);
   // Bumped when Home is pressed while already on "/", to remount the page and
   // reset any in-page steps (login step, apply role picker) to the start.
   const [homeKey, setHomeKey] = useState(0);
@@ -59,10 +80,13 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   const [hasInAppHistory, setHasInAppHistory] = useState(false);
   if (!hasInAppHistory && pathname !== firstPath) setHasInAppHistory(true);
 
-  const register = useCallback((handler: BackHandler | null) => {
+  const registerBack = useCallback((handler: BackHandler | null) => {
     setOverride(() => handler);
   }, []);
-  const ctx = useMemo(() => ({ register }), [register]);
+  const registerCancel = useCallback((handler: BackHandler | null) => {
+    setCancelOverride(() => handler);
+  }, []);
+  const ctx = useMemo(() => ({ registerBack, registerCancel }), [registerBack, registerCancel]);
 
   const onHome = pathname === "/";
   // Only the very first screen of a visit has nowhere to go back to: on Home
@@ -86,7 +110,9 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   }
 
   function handleCancel() {
-    if (onHome) {
+    if (cancelOverride) {
+      cancelOverride(); // the screen holds unsaved work and decides (e.g. confirm first)
+    } else if (onHome) {
       resetScreen();
       router.refresh(); // also re-fetch server data, so nothing stale survives the cancel
     } else {
@@ -134,8 +160,13 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
 
           <Link
             href="/"
-            onClick={() => {
-              if (onHome) resetScreen();
+            onClick={(e) => {
+              if (cancelOverride) {
+                e.preventDefault();
+                cancelOverride();
+              } else if (onHome) {
+                resetScreen();
+              }
             }}
             aria-label="Go to home"
             aria-current={onHome ? "page" : undefined}

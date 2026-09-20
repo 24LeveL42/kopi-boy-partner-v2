@@ -13,6 +13,7 @@ export default function Error({ error, retry }: { error: Error & { digest?: stri
   return (
     <StatusScreen
       tone="danger"
+      signOut="if-signed-in"
       title="Something went wrong"
       message="We couldn't load this page. Try again, or use Back, Cancel or Home above."
     >

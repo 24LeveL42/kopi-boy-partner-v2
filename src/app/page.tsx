@@ -3,7 +3,7 @@ import { LoginForm } from "@/components/LoginForm";
 import { ApplyForm } from "@/components/ApplyForm";
 import { StatusScreen } from "@/components/StatusScreen";
 import { PartnerShell } from "@/components/PartnerShell";
-import { KitchenSetupForm } from "@/components/KitchenSetupForm";
+import { KitchenSetupGate } from "@/components/KitchenSetupGate";
 import { PickerShell } from "@/components/PickerShell";
 import { resolvePartnerScreen } from "@/lib/partner-routing";
 import type { Profile, CookApplication, RiderApplication, PickerApplication } from "@/lib/types-auth";
@@ -78,7 +78,7 @@ export default async function Home() {
         />
       );
     case "kitchen-setup":
-      return <KitchenSetupForm userId={user.id} defaults={screen.defaults} />;
+      return <KitchenSetupGate userId={user.id} defaults={screen.defaults} />;
     case "partner-shell":
       return <PartnerShell userId={user.id} defaultView={screen.view} />;
     case "picker-shell":
