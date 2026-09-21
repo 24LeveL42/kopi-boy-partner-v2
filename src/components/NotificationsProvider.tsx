@@ -197,7 +197,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       setPushState(await enablePush(supabase));
     } catch (err) {
       console.error("Enabling push failed:", err);
-      setPushError("Couldn't turn on notifications. Please try again.");
+      // Supabase errors are plain objects, not Error instances, so read name/message/code off either.
+      const { name, message, code } = err as { name?: string; message?: string; code?: string };
+      const reason = [name && name !== "Error" ? name : code, message].filter(Boolean).join(": ");
+      setPushError(`Couldn't turn on notifications${reason ? ` (${reason.slice(0, 160)})` : ""}. Please try again.`);
       setPushState(await detectPushState());
     }
   }, [supabase]);

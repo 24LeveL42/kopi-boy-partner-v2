@@ -134,6 +134,7 @@ export async function POST(request: Request) {
   });
 
   const gone: string[] = [];
+  const failures: { status?: number; message: string }[] = [];
   let sent = 0;
 
   await Promise.all(
@@ -146,9 +147,12 @@ export async function POST(request: Request) {
         );
         sent += 1;
       } catch (err) {
-        const status = (err as { statusCode?: number }).statusCode;
+        const { statusCode: status, body, message: text } = err as { statusCode?: number; body?: string; message?: string };
         if (status === 404 || status === 410) gone.push(s.id); // unsubscribed / expired
-        else console.error("push: send failed:", status, err);
+        else {
+          console.error("push: send failed:", status, err);
+          failures.push({ status, message: String(body || text || "unknown error").slice(0, 200) });
+        }
       }
     })
   );
@@ -157,5 +161,15 @@ export async function POST(request: Request) {
     await admin.from("push_subscriptions").delete().in("id", gone);
   }
 
-  return NextResponse.json({ sent, removed: gone.length });
+  // `subscriptions` vs `sent` tells "recipient has no saved subscription"
+  // (subscriptions: 0) apart from "sends are failing" (see `failures`). Safe to
+  // return: the caller already proved it holds the webhook secret. Lands in
+  // net._http_response.
+  return NextResponse.json({
+    subscriptions: subs?.length ?? 0,
+    sent,
+    failed: failures.length,
+    removed: gone.length,
+    ...(failures.length > 0 && { failures: failures.slice(0, 3) }),
+  });
 }
