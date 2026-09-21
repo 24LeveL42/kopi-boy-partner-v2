@@ -38,6 +38,24 @@ async function currentSubscription() {
   return (await reg?.pushManager.getSubscription()) ?? null;
 }
 
+export interface LastPush {
+  at: string;
+  title: string;
+  result: string;
+  error?: string;
+}
+
+/** The last push the service worker handled on this device (written by public/sw.js). */
+export async function readLastPush(): Promise<LastPush | null> {
+  try {
+    if (!("caches" in window)) return null;
+    const res = await (await caches.open("kb-push-log")).match("/__push-last");
+    return res ? ((await res.json()) as LastPush) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** What the "Turn on notifications" control should show right now. */
 export async function detectPushState(): Promise<PushState> {
   if (!VAPID_PUBLIC_KEY) return "unconfigured";

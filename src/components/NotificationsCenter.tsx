@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useNotifications } from "./NotificationsProvider";
+import { readLastPush, type LastPush } from "@/lib/push-client";
 import { BROADCAST_ROLES, CATEGORIES_BY_ROLE, type AppNotification } from "@/lib/types-notifications";
 
 function timeAgo(iso: string) {
@@ -59,6 +61,20 @@ export function NotificationsCenter({ role }: { role: string }) {
   const { items, unreadCount, markRead, markAllRead, prefs, updatePrefs, pushState, pushError, turnOnPush, turnOffPush } =
     useNotifications();
 
+  // Re-read when the app comes back to the front, so "background it, send a
+  // push, return" shows whether the service worker handled that push.
+  const [lastPush, setLastPush] = useState<LastPush | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = () => void readLastPush().then((p) => live && setLastPush(p));
+    load();
+    document.addEventListener("visibilitychange", load);
+    return () => {
+      live = false;
+      document.removeEventListener("visibilitychange", load);
+    };
+  }, []);
+
   const categories = CATEGORIES_BY_ROLE[role] ?? [];
   const showDuty = BROADCAST_ROLES.includes(role);
 
@@ -89,6 +105,13 @@ export function NotificationsCenter({ role }: { role: string }) {
           >
             {pushState === "off" ? "Turn on notifications" : "Turn off notifications"}
           </button>
+        )}
+        {pushState === "on" && (
+          <p className="mt-2 text-[11px]" style={{ color: "var(--kb-ink-soft)" }}>
+            {lastPush
+              ? `Last push reached this device at ${new Date(lastPush.at).toLocaleTimeString()}: ${lastPush.result}${lastPush.error ? ` (${lastPush.error.slice(0, 120)})` : ""}.`
+              : "No push has reached this device yet."}
+          </p>
         )}
         {pushError && (
           <p className="mt-2 rounded-xl px-3 py-2 text-xs" style={{ background: "rgba(239,68,68,0.15)", color: "#B91C1C" }}>
