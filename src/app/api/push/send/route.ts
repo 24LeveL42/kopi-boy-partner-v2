@@ -22,6 +22,24 @@ function sameSecret(given: string | null, expected: string) {
   return timingSafeEqual(a, b);
 }
 
+/** Names what a mistakenly-pasted key actually is, or null if it could be a real service-role key. */
+function wrongKeyKind(key: string, publishableKey?: string) {
+  const k = key.trim();
+  if (k.startsWith("sb_publishable_") || (publishableKey && k === publishableKey.trim())) {
+    return "the publishable (anon) key";
+  }
+  const parts = k.split(".");
+  if (parts.length === 3) {
+    try {
+      const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      if (claims.role === "anon") return "the anon key";
+    } catch {
+      // not a decodable JWT — let Supabase reject it if it's bad
+    }
+  }
+  return null;
+}
+
 interface NotificationRecord {
   id: string;
   user_id: string;
@@ -70,7 +88,16 @@ export async function POST(request: Request) {
 
   webpush.setVapidDetails(VAPID_SUBJECT || "mailto:admin@example.com", NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
-  const admin = createClient(NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  // A key of the wrong kind doesn't error — RLS just hides every row, so pushes
+  // would silently go nowhere. Catch that here instead.
+  const wrongKey = wrongKeyKind(SUPABASE_SERVICE_ROLE_KEY, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
+  if (wrongKey) {
+    console.error(`push: SUPABASE_SERVICE_ROLE_KEY is ${wrongKey}`);
+    return NextResponse.json({ error: `SUPABASE_SERVICE_ROLE_KEY is ${wrongKey}, not the service_role key` }, { status: 503 });
+  }
+
+  // trim(): a pasted key with a trailing newline/space is an invalid header value.
+  const admin = createClient(NEXT_PUBLIC_SUPABASE_URL.trim(), SUPABASE_SERVICE_ROLE_KEY.trim(), {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
@@ -81,7 +108,20 @@ export async function POST(request: Request) {
 
   if (error) {
     console.error("push: loading subscriptions failed:", error);
-    return NextResponse.json({ error: "Could not load subscriptions" }, { status: 500 });
+    // The caller already proved it holds the webhook secret, so it's safe to
+    // say *why* — it lands in net._http_response, which makes this diagnosable
+    // from the SQL editor. Typical codes: 42501 = missing GRANT to service_role,
+    // PGRST205/42P01 = migration not run, 401/"Invalid API key" = wrong key.
+    return NextResponse.json(
+      {
+        error: "Could not load subscriptions",
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      },
+      { status: 500 }
+    );
   }
 
   const message = JSON.stringify({

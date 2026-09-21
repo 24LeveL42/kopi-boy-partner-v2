@@ -53,6 +53,24 @@ Dashboard → Database → Webhooks → **Create a new hook**:
 - URL: `https://<your-deployed-domain>/api/push/send`
 - HTTP Headers: `Content-Type: application/json` and `x-webhook-secret: <PUSH_WEBHOOK_SECRET>`
 
+**If the dashboard fails** with *"schema supabase_functions does not exist"* (that schema backs the Webhooks feature and isn't always provisioned), skip it and run `docs/supabase-push-trigger.sql` instead. It does the same thing with `pg_net` directly: edit the two values in its step 3 (your domain and the same `PUSH_WEBHOOK_SECRET`), then run it. To check delivery afterwards:
+
+```sql
+select id, status_code, error_msg, left(content, 120) from net._http_response order by created desc limit 5;
+```
+`200` = sent · `401` = secret doesn't match Vercel's · `503` = env vars missing or not redeployed.
+
+**If `net._http_response` shows a 500**, its `content` column now says why (`select status_code, content from net._http_response order by created desc limit 5;`):
+
+| `code` / message | Cause | Fix |
+|---|---|---|
+| `42501` permission denied for table push_subscriptions | `service_role` has no grant on the table | `grant select, delete on public.push_subscriptions to service_role;` (also in the migration now) |
+| `PGRST205` / `42P01` table not found | `supabase-notifications.sql` wasn't run (fully) | run it |
+| `401` / "Invalid API key" | `SUPABASE_SERVICE_ROLE_KEY` is truncated/wrong | re-copy the `service_role` key, redeploy |
+| "fetch failed" / empty message | `NEXT_PUBLIC_SUPABASE_URL` wrong on Vercel | fix the URL, redeploy |
+
+A **503** naming the anon/publishable key means the wrong key was pasted into `SUPABASE_SERVICE_ROLE_KEY`.
+
 Without steps 2–3 the in-app layer still works fully; only closed-app push is off.
 
 ### 4. Turn it on per device

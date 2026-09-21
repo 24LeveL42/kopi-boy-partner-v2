@@ -116,6 +116,11 @@ create index if not exists push_subscriptions_user_idx on public.push_subscripti
 alter table public.push_subscriptions enable row level security;
 
 grant select, delete on public.push_subscriptions to authenticated;
+-- The Partner app's server-side sender (/api/push/send) reads these with the
+-- service-role key. service_role skips RLS but NOT table grants, and newer
+-- Supabase projects don't grant it automatically — without this the sender
+-- fails with "permission denied for table push_subscriptions".
+grant select, delete on public.push_subscriptions to service_role;
 
 drop policy if exists "Users can read their own push subscriptions" on public.push_subscriptions;
 create policy "Users can read their own push subscriptions"
