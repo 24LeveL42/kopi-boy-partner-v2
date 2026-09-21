@@ -974,10 +974,14 @@ create policy "Riders can delete their own rider photos"
 -- Returns a row only when ALL of these hold, otherwise it returns nothing:
 --   * the order belongs to the caller (orders.customer_id = auth.uid()) —
 --     so a customer can't look up someone else's order by id;
---   * the order has a delivery_request with status = 'accepted' — i.e. a rider
---     is currently assigned. Open (no rider yet), cancelled, completed and
---     release_requested (rider backing out) all return nothing. Widen the
---     status list here if the order page should keep showing who delivered it.
+--   * the order has a delivery_request with status 'accepted' (a rider is on
+--     the way) or 'completed' (delivered — the order page keeps showing who
+--     brought it). If there are both, the completed one wins. Open (no rider
+--     yet), cancelled and release_requested (rider backing out) return nothing.
+--     This is the same rule as the Customer app's pickActiveDelivery().
+-- This is the ONE definition of get_order_rider(): the Customer app's schema
+-- deliberately does not define its own copy (two `create or replace`s of the
+-- same signature would silently overwrite each other, whichever ran last).
 -- Deliberately does not return rider_id (customers have no other way to read
 -- delivery_requests, so it would be a new identifier for them to hold).
 --
@@ -995,10 +999,11 @@ set search_path = public
 as $$
   select p.full_name, p.photo_url
   from public.orders o
-  join public.delivery_requests d on d.order_id = o.id and d.status = 'accepted'
+  join public.delivery_requests d on d.order_id = o.id and d.status in ('accepted', 'completed')
   join public.profiles p on p.id = d.rider_id
   where o.id = p_order_id
     and o.customer_id = auth.uid()
+  order by (d.status = 'completed') desc, d.created_at desc
   limit 1;
 $$;
 
