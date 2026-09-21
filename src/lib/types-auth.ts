@@ -5,6 +5,7 @@ export interface Profile {
   role: "customer" | "cook" | "rider" | "picker" | "admin";
   full_name: string | null;
   phone: string | null;
+  photo_url: string | null;
   is_active: boolean;
 }
 
@@ -25,6 +26,7 @@ export interface RiderApplication {
   user_id: string;
   vehicle_type: string | null;
   license_plate: string | null;
+  photo_url: string | null;
   status: ApplicationStatus;
   created_at: string;
 }

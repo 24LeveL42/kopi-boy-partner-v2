@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { PartnerRole } from "@/lib/types";
 import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
+import { PhotoPicker } from "./PhotoPicker";
 import { SignOutButton } from "./SignOutButton";
 
 export function ApplyForm({ userId }: { userId: string }) {
@@ -29,6 +30,8 @@ export function ApplyForm({ userId }: { userId: string }) {
   // Rider fields
   const [vehicleType, setVehicleType] = useState("Motorcycle");
   const [licensePlate, setLicensePlate] = useState("");
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   // Picker fields
   const [pickerNote, setPickerNote] = useState("");
@@ -49,7 +52,13 @@ export function ApplyForm({ userId }: { userId: string }) {
 
     const { error: profileError } = await supabase
       .from("profiles")
-      .update({ full_name: fullName.trim(), phone: contactNumber.trim() })
+      .update({
+        full_name: fullName.trim(),
+        phone: contactNumber.trim(),
+        // A rider's photo also seeds their live profile photo, so it carries
+        // over on approval; they can change it later from /account.
+        ...(roleChoice === "rider" && photoUrl ? { photo_url: photoUrl } : {}),
+      })
       .eq("id", userId);
 
     if (profileError) {
@@ -77,6 +86,7 @@ export function ApplyForm({ userId }: { userId: string }) {
         user_id: userId,
         vehicle_type: vehicleType,
         license_plate: licensePlate,
+        photo_url: photoUrl,
       });
       if (error) {
         setError(error.message);
@@ -214,12 +224,22 @@ export function ApplyForm({ userId }: { userId: string }) {
             <Field label="License plate (if applicable)">
               <input value={licensePlate} onChange={(e) => setLicensePlate(e.target.value)} className="kb-input" />
             </Field>
+            <Field label="Your photo (optional — helps HQ verify you)">
+              <PhotoPicker
+                userId={userId}
+                name={fullName}
+                value={photoUrl}
+                onChange={setPhotoUrl}
+                onUploadingChange={setPhotoUploading}
+                tone="dark"
+              />
+            </Field>
           </>
         ) : null}
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || photoUploading}
           className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
           style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
         >

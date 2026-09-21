@@ -80,7 +80,17 @@ export default async function Home() {
     case "kitchen-setup":
       return <KitchenSetupGate userId={user.id} defaults={screen.defaults} />;
     case "partner-shell":
-      return <PartnerShell userId={user.id} defaultView={screen.view} />;
+      return (
+        <PartnerShell
+          userId={user.id}
+          defaultView={screen.view}
+          riderProfile={
+            screen.view === "rider" && profile
+              ? { fullName: profile.full_name, phone: profile.phone, photoUrl: profile.photo_url }
+              : undefined
+          }
+        />
+      );
     case "picker-shell":
       return <PickerShell userId={user.id} />;
     case "apply":

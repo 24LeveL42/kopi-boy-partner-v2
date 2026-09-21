@@ -880,3 +880,127 @@ alter table public.orders add column if not exists ready_at timestamptz; -- set 
 alter table public.delivery_requests drop constraint if exists delivery_requests_status_check;
 alter table public.delivery_requests add constraint delivery_requests_status_check
   check (status in ('open', 'accepted', 'completed', 'cancelled', 'release_requested'));
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Rider photo + contact info
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 22. PHOTO COLUMNS ON RIDER_APPLICATIONS + PROFILES
+-- `rider_applications.photo_url` is the one-time snapshot submitted with the
+-- application (HQ reviews it; riders can't edit it afterwards — only admins
+-- have an UPDATE policy on that table). `profiles.photo_url` is the rider's
+-- live, self-editable photo, same idea as kitchens.hero_image being the live
+-- copy of what a cook first entered on their application. ApplyForm writes the
+-- photo to both, so it carries over on approval; the rider can then change
+-- only the profiles copy from /account.
+--
+-- There is deliberately NO contact_number column: the contact number is
+-- already captured on every application and stored as `profiles.phone` (see
+-- ApplyForm), and that column is already the live, self-editable copy.
+--
+-- No new GRANT/RLS needed for these columns — same as sections 14/17/19, the
+-- existing table-level `grant select, update on public.profiles` /
+-- `grant select, insert, update on public.rider_applications` and the
+-- "Users can update their own profile" / "Applicants can submit a rider
+-- application" policies have no column list, so they already cover them, and
+-- protect_profile_privileges (section 5) only reverts role/is_active.
+-- ----------------------------------------------------------------------------
+alter table public.rider_applications add column if not exists photo_url text;
+alter table public.profiles add column if not exists photo_url text;
+
+-- ----------------------------------------------------------------------------
+-- 23. RIDER-PHOTOS STORAGE BUCKET
+-- Same pattern as kitchen-photos (section 15): public read, and a user can only
+-- write inside their own `<auth uid>/` folder. Not restricted to role = 'rider'
+-- on purpose — an applicant uploads their photo *before* approval, while
+-- profiles.role is still 'customer'. Unlike kitchen-photos this bucket also
+-- caps size and mime type server-side, since it holds photos of people and the
+-- client-side `accept` filter alone isn't a control. Re-running updates those
+-- limits in place.
+-- ----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('rider-photos', 'rider-photos', true, 10485760, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Anyone can view rider photos" on storage.objects;
+create policy "Anyone can view rider photos"
+  on storage.objects for select
+  using (bucket_id = 'rider-photos');
+
+drop policy if exists "Riders can upload their own rider photos" on storage.objects;
+create policy "Riders can upload their own rider photos"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'rider-photos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "Riders can update their own rider photos" on storage.objects;
+create policy "Riders can update their own rider photos"
+  on storage.objects for update
+  using (bucket_id = 'rider-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'rider-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "Riders can delete their own rider photos" on storage.objects;
+create policy "Riders can delete their own rider photos"
+  on storage.objects for delete
+  using (bucket_id = 'rider-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Customer-facing assigned-rider lookup
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 24. get_order_rider(): NAME + PHOTO OF THE RIDER ON MY ORDER
+-- The Customer app shows the assigned rider's photo/name on the order page.
+-- This is a function, not a `profiles` SELECT policy, on purpose: RLS decides
+-- which ROWS a user can read, never which columns, and the table-level
+-- `grant select on public.profiles` covers every column — so a policy letting
+-- a customer read their rider's profile row would also hand over phone, role
+-- and is_active. `profiles` keeps its own-row/admin-only read policies
+-- unchanged; this SECURITY DEFINER function (runs as the table owner, so it can
+-- read past them) is the only path, and it returns exactly two columns.
+--
+-- Returns a row only when ALL of these hold, otherwise it returns nothing:
+--   * the order belongs to the caller (orders.customer_id = auth.uid()) —
+--     so a customer can't look up someone else's order by id;
+--   * the order has a delivery_request with status = 'accepted' — i.e. a rider
+--     is currently assigned. Open (no rider yet), cancelled, completed and
+--     release_requested (rider backing out) all return nothing. Widen the
+--     status list here if the order page should keep showing who delivered it.
+-- Deliberately does not return rider_id (customers have no other way to read
+-- delivery_requests, so it would be a new identifier for them to hold).
+--
+-- Execute is revoked from PUBLIC *and* anon/authenticated first because
+-- Supabase's default privileges grant EXECUTE on new public functions to
+-- anon/authenticated directly (revoking from PUBLIC alone doesn't undo that),
+-- then granted back to authenticated only.
+-- ----------------------------------------------------------------------------
+create or replace function public.get_order_rider(p_order_id uuid)
+returns table (full_name text, photo_url text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.full_name, p.photo_url
+  from public.orders o
+  join public.delivery_requests d on d.order_id = o.id and d.status = 'accepted'
+  join public.profiles p on p.id = d.rider_id
+  where o.id = p_order_id
+    and o.customer_id = auth.uid()
+  limit 1;
+$$;
+
+revoke all on function public.get_order_rider(uuid) from public, anon, authenticated;
+grant execute on function public.get_order_rider(uuid) to authenticated;
