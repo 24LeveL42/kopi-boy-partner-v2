@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# throwaway scripts for manual DB verification
+.verify-tmp
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

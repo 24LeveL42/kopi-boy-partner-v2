@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
 import type { DeliveryRequestWithKitchen } from "@/lib/types-delivery";
+import { OrderChat } from "@/components/OrderChat";
 
 interface RawRow {
   id: string;
@@ -161,6 +162,8 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
           >
             {busyId === myDelivery.id ? "Saving…" : "Mark delivered"}
           </button>
+
+          <OrderChat orderId={myDelivery.order_id} userId={riderId} />
         </div>
       ) : (
         <>
