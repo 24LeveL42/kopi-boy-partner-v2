@@ -1031,3 +1031,135 @@ grant execute on function public.get_order_rider(uuid) to authenticated;
 -- column either, same reasoning as section 22.
 -- ----------------------------------------------------------------------------
 alter table public.picker_applications add column if not exists photo_url text;
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Business registration number (UEN) for registered cooks
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 26. BUSINESS UEN ON COOK APPLICATIONS
+-- Every business type except 'Home Cook' (Hawker, Bakery, Small Business)
+-- must give its ACRA Business Registration Number; home cooks never carry
+-- one. This is a NEW column, deliberately not a reuse of the old
+-- `paynow_uen`: that one is payment details (and has lived on kitchens as
+-- paynow_type/paynow_value since section 17), whereas a registration number
+-- identifies the business itself. Many hawkers take PayNow on a mobile number
+-- while still having a UEN, so the two can differ.
+--
+-- Enforced by a BEFORE INSERT trigger rather than a CHECK constraint: every
+-- application already submitted has no business_uen, and a CHECK (even NOT
+-- VALID) is re-evaluated on every UPDATE, so HQ approving one of those older
+-- Hawker applications would start failing. Insert-only is exactly "new
+-- applications must have it". Applicants have no UPDATE policy on this table,
+-- so insert is the only way they write it. The trigger also normalises the
+-- value (trimmed, upper-case) and checks it against the three ACRA formats:
+--   * businesses        nnnnnnnnX    (8 digits + letter)
+--   * local companies   yyyynnnnnX   (9 digits + letter)
+--   * other entities    TyyPQnnnnX   (T/S/R, 2 digits, 2 letters, 4 digits, letter)
+-- Same rule as src/lib/business-uen.ts, which gives the form its early error.
+-- ----------------------------------------------------------------------------
+alter table public.cook_applications add column if not exists business_uen text;
+
+create or replace function public.check_cook_application_uen()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  new.business_uen := nullif(upper(btrim(coalesce(new.business_uen, ''))), '');
+
+  if new.business_type is not distinct from 'Home Cook' then
+    new.business_uen := null;
+  elsif new.business_uen is null then
+    raise exception 'A Business Registration Number (UEN) is required for registered businesses.' using errcode = '23514';
+  elsif new.business_uen !~ '^([0-9]{8}[A-Z]|[0-9]{9}[A-Z]|[TSR][0-9]{2}[A-Z]{2}[0-9]{4}[A-Z])$' then
+    raise exception 'That doesn''t look like a valid UEN (e.g. 53123456X or 201912345K).' using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists before_cook_application_insert on public.cook_applications;
+create trigger before_cook_application_insert
+  before insert on public.cook_applications
+  for each row execute function public.check_cook_application_uen();
+
+-- ----------------------------------------------------------------------------
+-- 27. VERIFIED BUSINESS UEN ON KITCHENS (customer-facing trust signal)
+-- kitchens.category is self-chosen by the cook in KitchenSetupForm, so it
+-- can't back a "registered business" badge. kitchens.business_uen can: it is
+-- never taken from the client. A BEFORE INSERT/UPDATE trigger always
+-- overwrites it with the UEN on the cook's latest APPROVED application
+-- (null if none), so whatever a cook sends for it is ignored, and approving
+-- an application refreshes an existing kitchen. SECURITY DEFINER so the
+-- approval path can update the cook's kitchen row (admins have no kitchens
+-- UPDATE need otherwise) and so the lookup doesn't depend on who's writing.
+-- The existing "Anyone can read live kitchens" policy has no column list, so
+-- customers can read it with no new grant — UENs are public record (ACRA
+-- BizFile), which is what makes showing it useful.
+-- ----------------------------------------------------------------------------
+alter table public.kitchens add column if not exists business_uen text;
+
+create or replace function public.approved_business_uen(p_user_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select ca.business_uen
+  from public.cook_applications ca
+  where ca.user_id = p_user_id and ca.status = 'approved'
+  order by ca.reviewed_at desc nulls last, ca.created_at desc
+  limit 1;
+$$;
+
+revoke all on function public.approved_business_uen(uuid) from public, anon, authenticated;
+
+create or replace function public.set_kitchen_business_uen()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.business_uen := public.approved_business_uen(new.id);
+  return new;
+end;
+$$;
+
+drop trigger if exists before_kitchen_business_uen on public.kitchens;
+create trigger before_kitchen_business_uen
+  before insert or update on public.kitchens
+  for each row execute function public.set_kitchen_business_uen();
+
+create or replace function public.sync_kitchen_business_uen()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- The kitchens trigger above recomputes the value; this just makes it run.
+  update public.kitchens set business_uen = null where id = new.user_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists after_cook_application_review on public.cook_applications;
+create trigger after_cook_application_review
+  after update of status on public.cook_applications
+  for each row
+  when (old.status is distinct from new.status)
+  execute function public.sync_kitchen_business_uen();
+
+-- Backfill only kitchens whose owner has an approved UEN, so rows with
+-- nothing to change keep their updated_at. (None yet on a fresh rollout:
+-- existing applications predate the column.)
+update public.kitchens k
+set business_uen = null
+where public.approved_business_uen(k.id) is distinct from k.business_uen;

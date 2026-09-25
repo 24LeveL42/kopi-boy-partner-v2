@@ -23,6 +23,8 @@ export interface Kitchen {
   is_live: boolean;
   paynow_type: PaynowType | null;
   paynow_value: string | null;
+  /** Set only by the database from the approved cook application (schema section 27) — never written by the app. */
+  business_uen: string | null;
   latitude: number | null;
   longitude: number | null;
 }

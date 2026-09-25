@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PartnerRole } from "@/lib/types";
+import { businessUenProblem, normalizeBusinessUen, requiresBusinessUen } from "@/lib/business-uen";
 import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
 import { PhotoPicker } from "./PhotoPicker";
@@ -26,6 +27,7 @@ export function ApplyForm({ userId }: { userId: string }) {
   const [neighbourhood, setNeighbourhood] = useState("");
   const [description, setDescription] = useState("");
   const [paynowUen, setPaynowUen] = useState("");
+  const [businessUen, setBusinessUen] = useState("");
 
   // Rider + picker photo
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -50,6 +52,15 @@ export function ApplyForm({ userId }: { userId: string }) {
       setError("Please fill in your full name and contact number.");
       setLoading(false);
       return;
+    }
+
+    if (roleChoice === "cook") {
+      const uenProblem = businessUenProblem(businessType, businessUen);
+      if (uenProblem) {
+        setError(uenProblem);
+        setLoading(false);
+        return;
+      }
     }
 
     const { error: profileError } = await supabase
@@ -77,6 +88,9 @@ export function ApplyForm({ userId }: { userId: string }) {
         neighbourhood,
         description,
         paynow_uen: paynowUen,
+        // Home cooks don't register a business, so they never send one (the
+        // insert trigger also clears it for them).
+        business_uen: requiresBusinessUen(businessType) ? normalizeBusinessUen(businessUen) : null,
       });
       if (error) {
         setError(error.message);
@@ -217,6 +231,19 @@ export function ApplyForm({ userId }: { userId: string }) {
                 <option>Small Business</option>
               </select>
             </Field>
+            {requiresBusinessUen(businessType) && (
+              <Field label="Business Registration Number (UEN)">
+                <input
+                  required
+                  value={businessUen}
+                  onChange={(e) => setBusinessUen(e.target.value)}
+                  className="kb-input"
+                  placeholder="e.g. 53123456X"
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                />
+              </Field>
+            )}
             <Field label="Neighbourhood">
               <input required value={neighbourhood} onChange={(e) => setNeighbourhood(e.target.value)} className="kb-input" placeholder="e.g. Toa Payoh" />
             </Field>

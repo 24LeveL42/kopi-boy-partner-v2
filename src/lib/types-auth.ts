@@ -17,6 +17,7 @@ export interface CookApplication {
   description: string | null;
   neighbourhood: string | null;
   paynow_uen: string | null;
+  business_uen: string | null;
   status: ApplicationStatus;
   created_at: string;
 }
