@@ -92,7 +92,12 @@ export default async function Home() {
         />
       );
     case "picker-shell":
-      return <PickerShell userId={user.id} />;
+      return (
+        <PickerShell
+          userId={user.id}
+          profile={profile ? { fullName: profile.full_name, phone: profile.phone, photoUrl: profile.photo_url } : undefined}
+        />
+      );
     case "apply":
       return <ApplyForm userId={user.id} />;
   }

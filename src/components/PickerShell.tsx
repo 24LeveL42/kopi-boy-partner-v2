@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
 import { TopBar } from "./TopBar";
+import { PickupChat } from "./PickupChat";
+import { ProfileSummaryCard, type ProfileSummary } from "./ProfileSummaryCard";
 import type { PickupRequestWithKitchen } from "@/lib/types-picker";
 
 interface RawRow {
@@ -35,7 +37,7 @@ function toRow(r: RawRow): PickupRequestWithKitchen {
   };
 }
 
-export function PickerShell({ userId }: { userId: string }) {
+export function PickerShell({ userId, profile }: { userId: string; profile?: ProfileSummary }) {
   const supabase = createClient();
   const [openRequests, setOpenRequests] = useState<PickupRequestWithKitchen[]>([]);
   const [myPickup, setMyPickup] = useState<PickupRequestWithKitchen | null>(null);
@@ -119,6 +121,12 @@ export function PickerShell({ userId }: { userId: string }) {
     <div className="mx-auto min-h-page max-w-md px-5 py-6" style={{ background: "var(--kb-navy)" }}>
       <TopBar badge="Picker" />
 
+      {profile && (
+        <div className="mt-4">
+          <ProfileSummaryCard profile={profile} />
+        </div>
+      )}
+
       <h1 className="mt-4 font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
         Picker
       </h1>
@@ -147,6 +155,8 @@ export function PickerShell({ userId }: { userId: string }) {
           >
             {busyId === myPickup.id ? "Saving…" : "Mark handoff complete"}
           </button>
+
+          <PickupChat pickupRequestId={myPickup.id} userId={userId} as="picker" />
         </div>
       ) : (
         <>

@@ -1009,3 +1009,25 @@ $$;
 
 revoke all on function public.get_order_rider(uuid) from public, anon, authenticated;
 grant execute on function public.get_order_rider(uuid) to authenticated;
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Picker photo
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 25. PHOTO COLUMN ON PICKER_APPLICATIONS
+-- Same split as riders (section 22): `picker_applications.photo_url` is the
+-- one-time snapshot HQ reviews (only admins can update that table), and
+-- `profiles.photo_url` (already added in section 22) is the live copy the
+-- picker edits from /account. ApplyForm writes both.
+--
+-- No new bucket: pickers upload to rider-photos (section 23). Its policies
+-- were never rider-only (public read, write only inside your own `<uid>/`
+-- folder, size/mime capped), so they already fit a picker exactly, and one
+-- bucket keeps partner profile photos in one place. No new GRANT/RLS for the
+-- column either, same reasoning as section 22.
+-- ----------------------------------------------------------------------------
+alter table public.picker_applications add column if not exists photo_url text;

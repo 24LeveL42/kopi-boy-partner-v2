@@ -6,16 +6,18 @@ import { createClient } from "@/lib/supabase/client";
 import { PhotoPicker } from "./PhotoPicker";
 
 /**
- * Live, self-editable rider profile — the photo and contact number an approved
- * rider can change any time, separate from the one-time application. Both live
- * on the rider's own `profiles` row (photo_url, phone).
+ * Live, self-editable rider/picker profile — the photo and contact number an
+ * approved rider or picker can change any time, separate from the one-time
+ * application. Both live on their own `profiles` row (photo_url, phone).
  */
-export function RiderProfileForm({
+export function PartnerProfileForm({
+  role,
   userId,
   fullName,
   phone,
   photoUrl,
 }: {
+  role: "rider" | "picker";
   userId: string;
   fullName: string | null;
   phone: string | null;
@@ -57,7 +59,7 @@ export function RiderProfileForm({
     setSaving(false);
 
     if (updateError) {
-      console.error("RiderProfileForm save error:", updateError);
+      console.error("PartnerProfileForm save error:", updateError);
       setError(updateError.message || "Couldn't save your profile — please try again.");
       return;
     }
@@ -79,7 +81,7 @@ export function RiderProfileForm({
       className="space-y-4 rounded-2xl bg-white p-5 shadow-lg"
       style={{ color: "var(--kb-ink)" }}
     >
-      <h2 className="font-display text-base font-bold">Rider profile</h2>
+      <h2 className="font-display text-base font-bold">{role === "rider" ? "Rider profile" : "Picker profile"}</h2>
 
       <div>
         <span className="mb-1 block text-xs font-medium" style={{ color: "var(--kb-ink-soft)" }}>

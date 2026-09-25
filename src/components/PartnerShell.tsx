@@ -3,13 +3,7 @@ import { TopBar } from "./TopBar";
 import { BottomNav } from "./BottomNav";
 import { CookOrdersPanel } from "./CookOrdersPanel";
 import { RiderDeliveriesPanel } from "./RiderDeliveriesPanel";
-import { Avatar } from "./Avatar";
-
-export interface RiderProfileSummary {
-  fullName: string | null;
-  phone: string | null;
-  photoUrl: string | null;
-}
+import { ProfileSummaryCard, type ProfileSummary } from "./ProfileSummaryCard";
 
 /**
  * Partner app shell — real role detection now (Feature #002 is done).
@@ -24,7 +18,7 @@ export function PartnerShell({
   userId: string;
   defaultView: "cook" | "rider";
   /** Shown at the top of the rider view; the editor itself lives at /account. */
-  riderProfile?: RiderProfileSummary;
+  riderProfile?: ProfileSummary;
 }) {
   return (
     <div className="min-h-page pb-24" style={{ background: "var(--kb-navy)" }}>
@@ -47,26 +41,7 @@ export function PartnerShell({
           </>
         ) : (
           <>
-            {riderProfile && (
-              <Link
-                href="/account"
-                className="flex items-center gap-3 rounded-2xl px-4 py-3"
-                style={{ background: "var(--kb-navy-raised)", border: "1px solid var(--kb-navy-line)" }}
-              >
-                <Avatar url={riderProfile.photoUrl} name={riderProfile.fullName} size={48} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold" style={{ color: "var(--kb-on-navy)" }}>
-                    {riderProfile.fullName || "Your profile"}
-                  </span>
-                  <span className="block truncate text-xs" style={{ color: "var(--kb-on-navy-soft)" }}>
-                    {riderProfile.phone || "Add your contact number"}
-                  </span>
-                </span>
-                <span className="shrink-0 text-sm font-semibold" style={{ color: "var(--kb-green)" }}>
-                  Edit profile &rsaquo;
-                </span>
-              </Link>
-            )}
+            {riderProfile && <ProfileSummaryCard profile={riderProfile} />}
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-bold" style={{ color: "var(--kb-on-navy)" }}>
                 Deliveries

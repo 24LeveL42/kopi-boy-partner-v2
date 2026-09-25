@@ -19,7 +19,7 @@ function describeUploadError(err: unknown): string {
 }
 
 /**
- * File picker for a rider's own photo: uploads as soon as a file is chosen
+ * File picker for a rider's or picker's own photo: uploads as soon as a file is chosen
  * (same as the kitchen/dish photo pickers), shows a preview, and reports the
  * resulting public URL through `onChange`. Nothing is written to the database
  * here — the parent form saves the URL along with its other fields.

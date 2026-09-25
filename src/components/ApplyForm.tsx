@@ -27,11 +27,13 @@ export function ApplyForm({ userId }: { userId: string }) {
   const [description, setDescription] = useState("");
   const [paynowUen, setPaynowUen] = useState("");
 
+  // Rider + picker photo
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+
   // Rider fields
   const [vehicleType, setVehicleType] = useState("Motorcycle");
   const [licensePlate, setLicensePlate] = useState("");
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [photoUploading, setPhotoUploading] = useState(false);
 
   // Picker fields
   const [pickerNote, setPickerNote] = useState("");
@@ -55,9 +57,9 @@ export function ApplyForm({ userId }: { userId: string }) {
       .update({
         full_name: fullName.trim(),
         phone: contactNumber.trim(),
-        // A rider's photo also seeds their live profile photo, so it carries
-        // over on approval; they can change it later from /account.
-        ...(roleChoice === "rider" && photoUrl ? { photo_url: photoUrl } : {}),
+        // A rider's or picker's photo also seeds their live profile photo, so
+        // it carries over on approval; they can change it later from /account.
+        ...((roleChoice === "rider" || roleChoice === "picker") && photoUrl ? { photo_url: photoUrl } : {}),
       })
       .eq("id", userId);
 
@@ -97,6 +99,7 @@ export function ApplyForm({ userId }: { userId: string }) {
       const { error } = await supabase.from("picker_applications").insert({
         user_id: userId,
         note: pickerNote || null,
+        photo_url: photoUrl,
       });
       if (error) {
         setError(error.message);
@@ -186,6 +189,18 @@ export function ApplyForm({ userId }: { userId: string }) {
               className="kb-input"
               rows={3}
               placeholder="e.g. usually free after school, near Toa Payoh"
+            />
+          </Field>
+        )}
+        {roleChoice === "picker" && (
+          <Field label="Your photo (optional — helps HQ verify you)">
+            <PhotoPicker
+              userId={userId}
+              name={fullName}
+              value={photoUrl}
+              onChange={setPhotoUrl}
+              onUploadingChange={setPhotoUploading}
+              tone="dark"
             />
           </Field>
         )}

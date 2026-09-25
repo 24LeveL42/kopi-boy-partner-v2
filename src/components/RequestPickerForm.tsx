@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { PickupRequestWithKitchen } from "@/lib/types-picker";
+import { PickupChat } from "./PickupChat";
 
 interface KitchenOption {
   id: string;
@@ -67,9 +68,13 @@ export function RequestPickerForm({
                 {STATUS_LABEL[r.status]}
               </p>
               {r.status === "accepted" && (
-                <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
-                  Pay the picker directly when they hand off the food (suggested ${r.suggested_fee.toFixed(2)}).
-                </p>
+                <>
+                  <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                    Pay the picker directly when they hand off the food (suggested ${r.suggested_fee.toFixed(2)}).
+                  </p>
+                  {/* Same window as pickup_chat_participant(): only while accepted. */}
+                  <PickupChat pickupRequestId={r.id} userId={userId} as="rider" />
+                </>
               )}
             </div>
           ))}

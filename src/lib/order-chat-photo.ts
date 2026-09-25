@@ -3,7 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // Must stay in sync with the order-chat-photos bucket and the messages checks
 // in docs/supabase-messages.sql (sections 4-5), which enforce the same rules
 // server-side. Same layout as the Customer app's complaint-photos helpers.
+// pickup-chat-photos (docs/supabase-pickup-messages.sql section 4) uses the
+// exact same limits and key layout, so both chats share these helpers.
 export const ORDER_CHAT_PHOTO_BUCKET = "order-chat-photos";
+export const PICKUP_CHAT_PHOTO_BUCKET = "pickup-chat-photos";
 export const ORDER_CHAT_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 export const ORDER_CHAT_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
@@ -20,31 +23,34 @@ export function validateOrderChatPhoto(file: { type: string; size: number }): st
 }
 
 /**
- * Object key `<order_id>/<uploader_id>/<random>.<ext>` — the storage policies
- * require exactly this layout, and messages_photo_path_check requires the key
- * to sit under the message's own order.
+ * Object key `<thread_id>/<uploader_id>/<random>.<ext>` (thread = order or
+ * pickup request) — the storage policies require exactly this layout, and the
+ * tables' photo_path checks require the key to sit under the row's own thread.
  */
-export function orderChatPhotoPath(orderId: string, userId: string, fileName: string, id: string): string {
+export function orderChatPhotoPath(threadId: string, userId: string, fileName: string, id: string): string {
   const ext = /\.([a-z0-9]{1,5})$/i.exec(fileName)?.[1]?.toLowerCase() ?? "jpg";
-  return `${orderId}/${userId}/${id}.${ext}`;
+  return `${threadId}/${userId}/${id}.${ext}`;
 }
 
 /**
- * Uploads a picked (already validated) photo under this order/user's folder
- * and returns its object key, or null if the upload failed. Every call gets a
- * fresh key, so nothing is ever overwritten.
+ * Uploads a picked (already validated) photo under this thread/user's folder
+ * of `bucket` and returns its object key, or null if the upload failed. Every
+ * call gets a fresh key, so nothing is ever overwritten.
  */
-export async function uploadOrderChatPhoto(
+export async function uploadChatPhoto(
   supabase: SupabaseClient,
-  orderId: string,
+  bucket: string,
+  threadId: string,
   userId: string,
   file: File
 ): Promise<string | null> {
-  const path = orderChatPhotoPath(orderId, userId, file.name, crypto.randomUUID());
-  const { error } = await supabase.storage
-    .from(ORDER_CHAT_PHOTO_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false });
+  const path = orderChatPhotoPath(threadId, userId, file.name, crypto.randomUUID());
+  const { error } = await supabase.storage.from(bucket).upload(path, file, { contentType: file.type, upsert: false });
   return error ? null : path;
+}
+
+export function uploadOrderChatPhoto(supabase: SupabaseClient, orderId: string, userId: string, file: File) {
+  return uploadChatPhoto(supabase, ORDER_CHAT_PHOTO_BUCKET, orderId, userId, file);
 }
 
 /** Trimmed body, or null when there's nothing sendable (text or a photo is required). */

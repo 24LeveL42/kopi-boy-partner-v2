@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "@/components/SignOutButton";
-import { RiderProfileForm } from "@/components/RiderProfileForm";
+import { PartnerProfileForm } from "@/components/PartnerProfileForm";
 import { resolvePartnerScreen } from "@/lib/partner-routing";
 import type { Profile, CookApplication, RiderApplication, PickerApplication } from "@/lib/types-auth";
 
@@ -24,18 +24,20 @@ export default async function AccountPage() {
     latestApplication<PickerApplication>("picker_applications"),
   ]);
 
-  // Same decision the home screen makes, so "approved rider" means the same
-  // thing here as it does for the rider dashboard. The kitchen only matters to
-  // the cook branch, which this page doesn't care about.
+  // Same decision the home screen makes, so "approved rider/picker" means the
+  // same thing here as it does for their dashboards. The kitchen only matters
+  // to the cook branch, which this page doesn't care about.
   const screen = resolvePartnerScreen({ profile, cookApp, riderApp, pickerApp, kitchen: null });
-  const isRider = screen.kind === "partner-shell" && screen.view === "rider";
+  const profileRole =
+    screen.kind === "partner-shell" && screen.view === "rider" ? "rider" : screen.kind === "picker-shell" ? "picker" : null;
 
   return (
     <div className="min-h-page px-4 py-8 sm:px-6" style={{ background: "var(--kb-navy)", color: "var(--kb-on-navy)" }}>
       <div className="mx-auto max-w-sm space-y-4">
         <h1 className="font-display text-xl font-bold">Account</h1>
-        {isRider && profile && (
-          <RiderProfileForm
+        {profileRole && profile && (
+          <PartnerProfileForm
+            role={profileRole}
             userId={user.id}
             fullName={profile.full_name}
             phone={profile.phone}

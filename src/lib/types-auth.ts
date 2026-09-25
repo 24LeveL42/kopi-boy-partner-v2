@@ -35,6 +35,7 @@ export interface PickerApplication {
   id: string;
   user_id: string;
   note: string | null;
+  photo_url: string | null;
   status: ApplicationStatus;
   created_at: string;
 }
