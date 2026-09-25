@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
 import type { DeliveryRequestWithKitchen } from "@/lib/types-delivery";
 import { OrderChat } from "@/components/OrderChat";
+import { ORDER_CHAT_PHOTO_TYPES, uploadOrderChatPhoto, validateOrderChatPhoto } from "@/lib/order-chat-photo";
 
 interface RawRow {
   id: string;
@@ -44,6 +45,14 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Proof-of-delivery step: "Mark delivered" opens it, and completing needs a photo.
+  const [proofOpen, setProofOpen] = useState(false);
+  const [proofPhoto, setProofPhoto] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  // Key of proofPhoto once uploaded, so retrying after a failed completion
+  // doesn't upload the same file again.
+  const [proofPath, setProofPath] = useState<string | null>(null);
+  const proofInputRef = useRef<HTMLInputElement>(null);
 
   // `silent` = live refresh: update in place without flashing the loading state.
   const load = useCallback(async (silent?: boolean) => {
@@ -115,19 +124,67 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
     load();
   }
 
-  async function markDelivered() {
-    if (!myDelivery) return;
-    setBusyId(myDelivery.id);
+  const proofPreviewRef = useRef<string | null>(null);
+  useEffect(() => () => {
+    if (proofPreviewRef.current) URL.revokeObjectURL(proofPreviewRef.current);
+  }, []);
+
+  function setProof(file: File | null) {
+    if (proofPreviewRef.current) URL.revokeObjectURL(proofPreviewRef.current);
+    proofPreviewRef.current = file ? URL.createObjectURL(file) : null;
+    setProofPreview(proofPreviewRef.current);
+    setProofPhoto(file);
+    setProofPath(null);
+  }
+
+  function closeProof() {
+    setProofOpen(false);
+    setProof(null);
     setError(null);
-    const { error: deliveredError } = await supabase
-      .from("delivery_requests")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
-      .eq("id", myDelivery.id);
-    setBusyId(null);
-    if (deliveredError) {
-      setError(deliveredError.message);
+  }
+
+  function handleProofPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    e.target.value = ""; // so picking the same file again still fires onChange
+    if (!file) return;
+    const problem = validateOrderChatPhoto(file);
+    if (problem) {
+      setError(problem);
       return;
     }
+    setError(null);
+    setProof(file);
+  }
+
+  // Upload first (the chat, and so the bucket, is only open while the delivery
+  // is accepted), then post the photo message and complete the delivery in one
+  // transaction — see complete_delivery_with_proof in docs/supabase-messages.sql.
+  async function markDelivered() {
+    if (!myDelivery || !proofPhoto) return;
+    setBusyId(myDelivery.id);
+    setError(null);
+
+    let path = proofPath;
+    if (!path) {
+      path = await uploadOrderChatPhoto(supabase, myDelivery.order_id, riderId, proofPhoto);
+      if (!path) {
+        setBusyId(null);
+        setError("Photo couldn't be uploaded — the delivery is not marked delivered yet. Please try again.");
+        return;
+      }
+      setProofPath(path);
+    }
+
+    const { error: deliveredError } = await supabase.rpc("complete_delivery_with_proof", {
+      p_request_id: myDelivery.id,
+      p_photo_path: path,
+    });
+    setBusyId(null);
+    if (deliveredError) {
+      setError(`${deliveredError.message} The delivery is not marked delivered yet.`);
+      return;
+    }
+    closeProof();
     load();
   }
 
@@ -154,14 +211,82 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
           <p className="mt-2 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
             Collect from the cook and agree the delivery fee directly with them.
           </p>
-          <button
-            onClick={markDelivered}
-            disabled={busyId === myDelivery.id}
-            className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold text-white disabled:opacity-60"
-            style={{ background: "var(--kb-green-deep)" }}
-          >
-            {busyId === myDelivery.id ? "Saving…" : "Mark delivered"}
-          </button>
+          {proofOpen ? (
+            <div className="mt-3 rounded-2xl p-3" style={{ background: "var(--kb-cream)" }}>
+              <p className="text-sm font-semibold">Proof of delivery</p>
+              <p className="mt-0.5 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                Attach a photo of the handed-over order. It&apos;s posted to the customer chat when you confirm.
+              </p>
+
+              <input
+                ref={proofInputRef}
+                type="file"
+                accept={ORDER_CHAT_PHOTO_TYPES.join(",")}
+                onChange={handleProofPicked}
+                className="hidden"
+                aria-label="Attach proof-of-delivery photo"
+              />
+              {proofPhoto ? (
+                <div className="mt-2">
+                  {proofPreview && (
+                    // Local object URL of the picked file — nothing for next/image to optimise.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={proofPreview} alt="Proof-of-delivery photo" className="max-h-48 w-full rounded-xl object-cover" />
+                  )}
+                  <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate">📎 {proofPhoto.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setProof(null)}
+                      disabled={busyId === myDelivery.id}
+                      className="shrink-0 font-semibold disabled:opacity-60"
+                      style={{ color: "var(--kb-danger)" }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => proofInputRef.current?.click()}
+                  className="mt-2 w-full rounded-xl border border-dashed py-3 text-sm font-semibold"
+                  style={{ borderColor: "var(--kb-navy-line)", color: "var(--kb-ink-soft)" }}
+                >
+                  Attach photo
+                </button>
+              )}
+
+              <button
+                onClick={() => void markDelivered()}
+                disabled={!proofPhoto || busyId === myDelivery.id}
+                className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold text-white disabled:opacity-60"
+                style={{ background: "var(--kb-green-deep)" }}
+              >
+                {busyId === myDelivery.id ? "Saving…" : proofPhoto ? "Confirm delivered" : "Attach a photo to confirm"}
+              </button>
+              <button
+                type="button"
+                onClick={closeProof}
+                disabled={busyId === myDelivery.id}
+                className="mt-2 w-full text-xs font-semibold disabled:opacity-60"
+                style={{ color: "var(--kb-ink-soft)" }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setProof(null);
+                setProofOpen(true);
+              }}
+              className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold text-white"
+              style={{ background: "var(--kb-green-deep)" }}
+            >
+              Mark delivered
+            </button>
+          )}
 
           <OrderChat orderId={myDelivery.order_id} userId={riderId} />
         </div>

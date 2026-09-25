@@ -9,7 +9,7 @@ import {
   ORDER_CHAT_PHOTO_TYPES,
   ORDER_CHAT_PHOTO_URL_TTL_SECONDS,
   normalizeOrderChatBody,
-  orderChatPhotoPath,
+  uploadOrderChatPhoto,
   validateOrderChatPhoto,
 } from "@/lib/order-chat-photo";
 
@@ -123,11 +123,8 @@ export function OrderChat({ orderId, userId }: { orderId: string; userId: string
 
     let photoPath: string | null = null;
     if (photo) {
-      photoPath = orderChatPhotoPath(orderId, userId, photo.name, crypto.randomUUID());
-      const { error: uploadError } = await supabase.storage
-        .from(ORDER_CHAT_PHOTO_BUCKET)
-        .upload(photoPath, photo, { contentType: photo.type, upsert: false });
-      if (uploadError) {
+      photoPath = await uploadOrderChatPhoto(supabase, orderId, userId, photo);
+      if (!photoPath) {
         setSending(false);
         setError("Photo couldn't be uploaded — please try again.");
         return;

@@ -12,5 +12,7 @@ export interface OrderMessage {
   body: string;
   /** Key in the private `order-chat-photos` bucket, not a URL — OrderChat signs it to render. */
   photo_path: string | null;
+  /** Posted by complete_delivery_with_proof; stays readable by the customer after completion. */
+  is_delivery_proof: boolean;
   created_at: string;
 }

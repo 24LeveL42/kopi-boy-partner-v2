@@ -1,3 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 // Must stay in sync with the order-chat-photos bucket and the messages checks
 // in docs/supabase-messages.sql (sections 4-5), which enforce the same rules
 // server-side. Same layout as the Customer app's complaint-photos helpers.
@@ -25,6 +27,24 @@ export function validateOrderChatPhoto(file: { type: string; size: number }): st
 export function orderChatPhotoPath(orderId: string, userId: string, fileName: string, id: string): string {
   const ext = /\.([a-z0-9]{1,5})$/i.exec(fileName)?.[1]?.toLowerCase() ?? "jpg";
   return `${orderId}/${userId}/${id}.${ext}`;
+}
+
+/**
+ * Uploads a picked (already validated) photo under this order/user's folder
+ * and returns its object key, or null if the upload failed. Every call gets a
+ * fresh key, so nothing is ever overwritten.
+ */
+export async function uploadOrderChatPhoto(
+  supabase: SupabaseClient,
+  orderId: string,
+  userId: string,
+  file: File
+): Promise<string | null> {
+  const path = orderChatPhotoPath(orderId, userId, file.name, crypto.randomUUID());
+  const { error } = await supabase.storage
+    .from(ORDER_CHAT_PHOTO_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false });
+  return error ? null : path;
 }
 
 /** Trimmed body, or null when there's nothing sendable (text or a photo is required). */
