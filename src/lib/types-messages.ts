@@ -8,6 +8,9 @@ export interface OrderMessage {
   id: string;
   order_id: string;
   sender_id: string;
+  /** May be empty only when photo_path is set (messages_body_check). */
   body: string;
+  /** Key in the private `order-chat-photos` bucket, not a URL — OrderChat signs it to render. */
+  photo_path: string | null;
   created_at: string;
 }

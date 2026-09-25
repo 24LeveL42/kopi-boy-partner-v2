@@ -102,6 +102,80 @@ begin
 end $$;
 
 -- ----------------------------------------------------------------------------
+-- 4. PHOTO ATTACHMENTS
+-- Same shape as the Customer app's complaint_messages + complaint-photos
+-- (its supabase-schema.sql sections 25-26): a message may carry a photo, and
+-- photo_path is an object KEY in a PRIVATE bucket, not a URL — the app turns
+-- it into a short-lived signed URL when rendering. Body may be empty only
+-- alongside a photo. The path check pins the key under this message's own
+-- order folder, so a message can't point at another order's photo.
+--
+-- The existing table-level `grant select, insert on public.messages` already
+-- covers the new column; nothing to add there.
+-- ----------------------------------------------------------------------------
+alter table public.messages add column if not exists photo_path text;
+alter table public.messages alter column body set default '';
+
+-- Replaces the inline check from section 1 (Postgres auto-named it
+-- messages_body_check). Existing rows all have a non-empty body, so they pass.
+alter table public.messages drop constraint if exists messages_body_check;
+alter table public.messages add constraint messages_body_check
+  check (length(body) <= 2000 and (length(btrim(body)) > 0 or photo_path is not null));
+
+alter table public.messages drop constraint if exists messages_photo_path_check;
+alter table public.messages add constraint messages_photo_path_check
+  check (photo_path is null or photo_path like order_id::text || '/%');
+
+-- ----------------------------------------------------------------------------
+-- 5. ORDER CHAT PHOTOS BUCKET (private)
+-- Object key: <order_id>/<uploader_id>/<random>.<ext>. Read and upload are
+-- allowed to exactly the people order_chat_participant() lets into the chat
+-- (first folder), and uploads must sit in the uploader's own sub-folder. So
+-- photos follow the chat's own window: once the delivery is completed or the
+-- order is cancelled/rejected, neither side can fetch or sign them any more
+-- (the objects are kept, like the message rows). No update/delete policy:
+-- chat history is immutable. The regex guard keeps a non-uuid folder name
+-- from raising a cast error inside the policy — such a key is just denied.
+--
+-- No storage GRANTs needed: Supabase already grants authenticated
+-- select/insert on storage.objects; these policies are what scope it.
+-- ----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('order-chat-photos', 'order-chat-photos', false, 5242880,
+        array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Order chat participants can view its photos" on storage.objects;
+create policy "Order chat participants can view its photos"
+  on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'order-chat-photos'
+    and case
+      when (storage.foldername(name))[1] ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        then public.order_chat_participant(((storage.foldername(name))[1])::uuid)
+      else false
+    end
+  );
+
+drop policy if exists "Order chat participants can upload photos" on storage.objects;
+create policy "Order chat participants can upload photos"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'order-chat-photos'
+    and (storage.foldername(name))[2] = auth.uid()::text
+    and case
+      when (storage.foldername(name))[1] ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        then public.order_chat_participant(((storage.foldername(name))[1])::uuid)
+      else false
+    end
+  );
+
+-- ----------------------------------------------------------------------------
 -- HOW TO CHECK IT'S WORKING (run after applying the file above)
 --
 -- As the DB owner (SQL Editor bypasses RLS, so this only proves the rows
@@ -118,4 +192,7 @@ end $$;
 --   * once the rider marks the delivery completed (or it's cancelled), both
 --     the customer's and the rider's selects go back to zero rows for that
 --     order_id, even though the rows are still in the table.
+--   * photos: the unrelated user's upload to order-chat-photos/<order_id>/...
+--     is rejected, and createSignedUrl on an existing photo key fails for
+--     them (and for both participants once the delivery is completed).
 -- ----------------------------------------------------------------------------
