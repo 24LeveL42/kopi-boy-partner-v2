@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PhotoValidationError, RIDER_PHOTO_ACCEPT, uploadRiderPhoto } from "@/lib/rider-photo";
 import { Avatar } from "./Avatar";
+import { Spinner } from "./Pending";
 
 // Supabase Storage errors don't always put the reason in `.message`, so log the
 // raw object and surface whatever readable text is there (same approach as
@@ -78,7 +79,8 @@ export function PhotoPicker({
         />
       </div>
       {uploading && (
-        <p className="mt-1 text-xs" style={{ color: soft }}>
+        <p className="mt-1 flex items-center gap-1.5 text-xs" style={{ color: soft }}>
+          <Spinner size={12} />
           Uploading…
         </p>
       )}

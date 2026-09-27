@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
+import { usePendingAction } from "@/lib/use-pending-action";
+import { PendingLabel } from "./Pending";
+import { SkeletonCards } from "./Skeleton";
 import type { OrderWithItems } from "@/lib/types-orders";
 import type { DeliveryRequest } from "@/lib/types-delivery";
 
@@ -26,8 +29,8 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
   const [awaitingPayment, setAwaitingPayment] = useState<OrderWithItems[]>([]);
   const [inKitchen, setInKitchen] = useState<OrderWithDelivery[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { busy, isRunning, run } = usePendingAction();
 
   // `silent` = live refresh: update in place without flashing the loading state.
   const load = useCallback(async (silent?: boolean) => {
@@ -69,89 +72,73 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
     () => void load(true)
   );
 
-  async function decide(orderId: string, decision: "accepted" | "rejected") {
-    setBusyId(orderId);
-    setError(null);
-    const { error: decideError } = await supabase
-      .from("orders")
-      .update({ order_status: decision, decided_at: new Date().toISOString() })
-      .eq("id", orderId)
-      .eq("order_status", "placed"); // can't decide an already-decided order
-    setBusyId(null);
-    if (decideError) {
-      setError(decideError.message);
-      return;
-    }
-    load();
+  // Every order action is one guarded write, then a silent reload so the card
+  // has moved on before its button re-enables.
+  function act(key: string, write: () => PromiseLike<{ error: { message: string } | null }>) {
+    run(key, async () => {
+      setError(null);
+      const { error: writeError } = await write();
+      if (writeError) {
+        setError(writeError.message);
+        return;
+      }
+      await load(true);
+    });
   }
 
-  async function markPaid(orderId: string) {
-    setBusyId(orderId);
-    setError(null);
-    const { error: paidError } = await supabase
-      .from("orders")
-      .update({ payment_status: "paid", paid_at: new Date().toISOString() })
-      .eq("id", orderId)
-      .eq("order_status", "accepted")
-      .eq("payment_status", "unpaid"); // can't mark paid before accepted / twice
-    setBusyId(null);
-    if (paidError) {
-      setError(paidError.message);
-      return;
-    }
-    load();
+  function decide(orderId: string, decision: "accepted" | "rejected") {
+    act(`${orderId}:${decision}`, () =>
+      supabase
+        .from("orders")
+        .update({ order_status: decision, decided_at: new Date().toISOString() })
+        .eq("id", orderId)
+        .eq("order_status", "placed") // can't decide an already-decided order
+    );
   }
 
-  async function startCooking(orderId: string) {
-    setBusyId(orderId);
-    setError(null);
-    const { error: startError } = await supabase
-      .from("orders")
-      .update({ preparation_status: "preparing" })
-      .eq("id", orderId)
-      .eq("order_status", "accepted")
-      .eq("preparation_status", "not_started"); // can't start cooking before accepted / twice
-    setBusyId(null);
-    if (startError) {
-      setError(startError.message);
-      return;
-    }
-    load();
+  function markPaid(orderId: string) {
+    act(`${orderId}:paid`, () =>
+      supabase
+        .from("orders")
+        .update({ payment_status: "paid", paid_at: new Date().toISOString() })
+        .eq("id", orderId)
+        .eq("order_status", "accepted")
+        .eq("payment_status", "unpaid") // can't mark paid before accepted / twice
+    );
   }
 
-  async function markReady(orderId: string) {
-    setBusyId(orderId);
-    setError(null);
-    const { error: readyError } = await supabase
-      .from("orders")
-      .update({ preparation_status: "ready", ready_at: new Date().toISOString() })
-      .eq("id", orderId)
-      .eq("order_status", "accepted")
-      .eq("preparation_status", "preparing"); // can't skip straight from not_started / twice
-    setBusyId(null);
-    if (readyError) {
-      setError(readyError.message);
-      return;
-    }
-    load();
+  function startCooking(orderId: string) {
+    act(`${orderId}:cook`, () =>
+      supabase
+        .from("orders")
+        .update({ preparation_status: "preparing" })
+        .eq("id", orderId)
+        .eq("order_status", "accepted")
+        .eq("preparation_status", "not_started") // can't start cooking before accepted / twice
+    );
   }
 
-  async function requestRider(orderId: string) {
-    setBusyId(orderId);
-    setError(null);
-    const { error: requestError } = await supabase
-      .from("delivery_requests")
-      .insert({ order_id: orderId, kitchen_id: kitchenId });
-    setBusyId(null);
-    if (requestError) {
-      setError(requestError.message);
-      return;
-    }
-    load();
+  function markReady(orderId: string) {
+    act(`${orderId}:ready`, () =>
+      supabase
+        .from("orders")
+        .update({ preparation_status: "ready", ready_at: new Date().toISOString() })
+        .eq("id", orderId)
+        .eq("order_status", "accepted")
+        .eq("preparation_status", "preparing") // can't skip straight from not_started / twice
+    );
+  }
+
+  function requestRider(orderId: string) {
+    act(`${orderId}:rider`, () => supabase.from("delivery_requests").insert({ order_id: orderId, kitchen_id: kitchenId }));
+  }
+
+  function refresh() {
+    run("refresh", () => load(true));
   }
 
   if (loading) {
-    return <p className="mt-4 text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>Loading…</p>;
+    return <SkeletonCards count={3} />;
   }
 
   return (
@@ -182,19 +169,19 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
                 <div className="mt-3 flex gap-2">
                   <button
                     onClick={() => decide(o.id, "accepted")}
-                    disabled={busyId === o.id}
+                    disabled={busy}
                     className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                     style={{ background: "var(--kb-green-deep)" }}
                   >
-                    {busyId === o.id ? "Saving…" : "Accept"}
+                    <PendingLabel pending={isRunning(`${o.id}:accepted`)} pendingText="Accepting…">Accept</PendingLabel>
                   </button>
                   <button
                     onClick={() => decide(o.id, "rejected")}
-                    disabled={busyId === o.id}
+                    disabled={busy}
                     className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                     style={{ background: "var(--kb-danger)" }}
                   >
-                    Reject
+                    <PendingLabel pending={isRunning(`${o.id}:rejected`)} pendingText="Rejecting…">Reject</PendingLabel>
                   </button>
                 </div>
               </div>
@@ -222,11 +209,11 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
                 <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>{itemsSummary(o)}</p>
                 <button
                   onClick={() => markPaid(o.id)}
-                  disabled={busyId === o.id}
+                  disabled={busy}
                   className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                   style={{ background: "var(--kb-purple)" }}
                 >
-                  {busyId === o.id ? "Saving…" : "Mark PayNow received"}
+                  <PendingLabel pending={isRunning(`${o.id}:paid`)} pendingText="Saving…">Mark PayNow received</PendingLabel>
                 </button>
               </div>
             ))}
@@ -254,21 +241,21 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
                 {o.preparation_status === "not_started" && (
                   <button
                     onClick={() => startCooking(o.id)}
-                    disabled={busyId === o.id}
+                    disabled={busy}
                     className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                     style={{ background: "var(--kb-green-deep)" }}
                   >
-                    {busyId === o.id ? "Saving…" : "Start Cooking"}
+                    <PendingLabel pending={isRunning(`${o.id}:cook`)} pendingText="Starting…">Start Cooking</PendingLabel>
                   </button>
                 )}
                 {o.preparation_status === "preparing" && (
                   <button
                     onClick={() => markReady(o.id)}
-                    disabled={busyId === o.id}
+                    disabled={busy}
                     className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                     style={{ background: "var(--kb-purple)" }}
                   >
-                    {busyId === o.id ? "Saving…" : "Mark Ready — Looking for Rider"}
+                    <PendingLabel pending={isRunning(`${o.id}:ready`)} pendingText="Marking ready…">Mark Ready — Looking for Rider</PendingLabel>
                   </button>
                 )}
                 {o.preparation_status === "ready" && (() => {
@@ -295,11 +282,11 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
                   return (
                     <button
                       onClick={() => requestRider(o.id)}
-                      disabled={busyId === o.id}
+                      disabled={busy}
                       className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                       style={{ background: "var(--kb-purple)" }}
                     >
-                      {busyId === o.id ? "Saving…" : "Request a rider"}
+                      <PendingLabel pending={isRunning(`${o.id}:rider`)} pendingText="Requesting…">Request a rider</PendingLabel>
                     </button>
                   );
                 })()}
@@ -310,11 +297,12 @@ export function CookOrdersPanel({ kitchenId }: { kitchenId: string }) {
       </section>
 
       <button
-        onClick={() => void load()}
-        className="w-full rounded-2xl py-2.5 text-sm font-semibold"
+        onClick={refresh}
+        disabled={busy}
+        className="w-full rounded-2xl py-2.5 text-sm font-semibold disabled:opacity-60"
         style={{ background: "var(--kb-navy-raised)", color: "var(--kb-on-navy)" }}
       >
-        Refresh
+        <PendingLabel pending={isRunning("refresh")} pendingText="Refreshing…">Refresh</PendingLabel>
       </button>
     </div>
   );

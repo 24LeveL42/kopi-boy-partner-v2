@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { usePendingAction } from "@/lib/use-pending-action";
+import { PendingLabel } from "./Pending";
 import { PhotoPicker } from "./PhotoPicker";
 
 /**
@@ -31,13 +33,13 @@ export function PartnerProfileForm({
   // What's currently saved, so "Save" is only enabled when something changed.
   const [saved, setSaved] = useState({ phone: phone ?? "", photo: photoUrl });
   const [photoUploading, setPhotoUploading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const { busy: saving, run } = usePendingAction();
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
 
   const dirty = contactNumber.trim() !== saved.phone || photo !== saved.photo;
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setJustSaved(false);
@@ -48,30 +50,30 @@ export function PartnerProfileForm({
       return;
     }
 
-    setSaving(true);
-    // .select() so a write that RLS silently filters to zero rows is reported
-    // as a failure instead of looking like a successful save.
-    const { data, error: updateError } = await supabase
-      .from("profiles")
-      .update({ phone: nextPhone, photo_url: photo })
-      .eq("id", userId)
-      .select("id");
-    setSaving(false);
+    run("save", async () => {
+      // .select() so a write that RLS silently filters to zero rows is reported
+      // as a failure instead of looking like a successful save.
+      const { data, error: updateError } = await supabase
+        .from("profiles")
+        .update({ phone: nextPhone, photo_url: photo })
+        .eq("id", userId)
+        .select("id");
 
-    if (updateError) {
-      console.error("PartnerProfileForm save error:", updateError);
-      setError(updateError.message || "Couldn't save your profile — please try again.");
-      return;
-    }
-    if (!data || data.length === 0) {
-      setError("Couldn't save your profile — your account wasn't updated. Please try again.");
-      return;
-    }
+      if (updateError) {
+        console.error("PartnerProfileForm save error:", updateError);
+        setError(updateError.message || "Couldn't save your profile — please try again.");
+        return;
+      }
+      if (!data || data.length === 0) {
+        setError("Couldn't save your profile — your account wasn't updated. Please try again.");
+        return;
+      }
 
-    setContactNumber(nextPhone);
-    setSaved({ phone: nextPhone, photo });
-    setJustSaved(true);
-    router.refresh();
+      setContactNumber(nextPhone);
+      setSaved({ phone: nextPhone, photo });
+      setJustSaved(true);
+      router.refresh();
+    });
   }
 
   return (
@@ -139,7 +141,7 @@ export function PartnerProfileForm({
         className="w-full rounded-2xl py-3 text-[15px] font-semibold text-white disabled:opacity-60"
         style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
       >
-        {saving ? "Saving…" : "Save changes"}
+        <PendingLabel pending={saving} pendingText="Saving…">Save changes</PendingLabel>
       </button>
     </form>
   );

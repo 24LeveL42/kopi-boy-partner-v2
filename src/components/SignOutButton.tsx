@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { usePendingAction } from "@/lib/use-pending-action";
 import { removeDeviceSubscription } from "@/lib/push-client";
+import { PendingLabel } from "./Pending";
 
 export function SignOutButton({ onlyWhenSignedIn = false }: { onlyWhenSignedIn?: boolean }) {
   const supabase = createClient();
@@ -11,6 +13,7 @@ export function SignOutButton({ onlyWhenSignedIn = false }: { onlyWhenSignedIn?:
   // For pages that render for signed-out visitors too (404, crash screen):
   // stay hidden until the browser session confirms someone is signed in.
   const [signedIn, setSignedIn] = useState(!onlyWhenSignedIn);
+  const { busy, run, startTransition } = usePendingAction();
 
   useEffect(() => {
     if (!onlyWhenSignedIn) return;
@@ -25,13 +28,17 @@ export function SignOutButton({ onlyWhenSignedIn = false }: { onlyWhenSignedIn?:
     };
   }, [onlyWhenSignedIn]);
 
-  async function handleSignOut() {
-    // While still signed in, so the RPC is authorised: stop this device
-    // receiving the outgoing account's push alerts.
-    await removeDeviceSubscription(supabase);
-    await supabase.auth.signOut();
-    router.push("/");
-    router.refresh();
+  function handleSignOut() {
+    run("sign-out", async () => {
+      // While still signed in, so the RPC is authorised: stop this device
+      // receiving the outgoing account's push alerts.
+      await removeDeviceSubscription(supabase);
+      await supabase.auth.signOut();
+      startTransition(() => {
+        router.push("/");
+        router.refresh();
+      });
+    });
   }
 
   if (!signedIn) return null;
@@ -40,10 +47,11 @@ export function SignOutButton({ onlyWhenSignedIn = false }: { onlyWhenSignedIn?:
     <button
       type="button"
       onClick={handleSignOut}
-      className="w-full rounded-xl py-2.5 text-sm font-medium"
+      disabled={busy}
+      className="w-full rounded-xl py-2.5 text-sm font-medium disabled:opacity-60"
       style={{ background: "var(--kb-cream)", color: "var(--kb-ink)" }}
     >
-      Sign out
+      <PendingLabel pending={busy} pendingText="Signing out…">Sign out</PendingLabel>
     </button>
   );
 }

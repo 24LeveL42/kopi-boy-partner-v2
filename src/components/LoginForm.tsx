@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { usePendingAction } from "@/lib/use-pending-action";
 import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
+import { PendingLabel } from "./Pending";
 
 type Step = "choice" | "enter-phone" | "enter-code";
 type Intent = "signup" | "signin";
@@ -22,9 +24,9 @@ export function LoginForm({ initialError = null }: { initialError?: string | nul
   const [intent, setIntent] = useState<Intent>("signin");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  // Google, send-code and verify share one busy state: none can start while another runs.
+  const { busy, isRunning, run, startTransition } = usePendingAction();
 
   const supabase = createClient();
   const router = useRouter();
@@ -56,55 +58,59 @@ export function LoginForm({ initialError = null }: { initialError?: string | nul
     if (step === "choice") setStep("enter-phone");
   }
 
-  async function handleGoogleSignIn() {
-    setGoogleLoading(true);
-    setError(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
-    });
-    if (error) {
-      setError(error.message);
-      setGoogleLoading(false);
-    }
-    // On success, the browser navigates away to Google — no further action needed here.
-  }
-
-  async function handleSendCode(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    // Sign in only works for an existing account; only Sign up may create one.
-    // Without this, a mistyped number on "Sign in" would silently create a
-    // brand-new account instead of telling the user.
-    const { error } = await supabase.auth.signInWithOtp({
-      phone: fullPhone,
-      options: { shouldCreateUser: intent === "signup" },
-    });
-    setLoading(false);
-    if (error) {
-      if (intent === "signin" && (error.code === "otp_disabled" || /signups? not allowed/i.test(error.message))) {
-        setError("We couldn't find an account for that number. Check the number, or tap Sign up if you're new.");
-      } else {
+  function handleGoogleSignIn() {
+    run("google", async () => {
+      setError(null);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
+      });
+      if (error) {
         setError(error.message);
+        return;
       }
-      return;
-    }
-    setStep("enter-code");
+      // On success the browser is navigating away to Google — stay busy until it does.
+      await new Promise<never>(() => {});
+    });
   }
 
-  async function handleVerifyCode(e: React.FormEvent) {
+  function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
-    const { error } = await supabase.auth.verifyOtp({ phone: fullPhone, token: code, type: "sms" });
-    setLoading(false);
-    if (error) {
-      setError(error.message);
-      return;
-    }
-    router.push("/");
-    router.refresh();
+    run("send", async () => {
+      setError(null);
+      // Sign in only works for an existing account; only Sign up may create one.
+      // Without this, a mistyped number on "Sign in" would silently create a
+      // brand-new account instead of telling the user.
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: fullPhone,
+        options: { shouldCreateUser: intent === "signup" },
+      });
+      if (error) {
+        if (intent === "signin" && (error.code === "otp_disabled" || /signups? not allowed/i.test(error.message))) {
+          setError("We couldn't find an account for that number. Check the number, or tap Sign up if you're new.");
+        } else {
+          setError(error.message);
+        }
+        return;
+      }
+      setStep("enter-code");
+    });
+  }
+
+  function handleVerifyCode(e: React.FormEvent) {
+    e.preventDefault();
+    run("verify", async () => {
+      setError(null);
+      const { error } = await supabase.auth.verifyOtp({ phone: fullPhone, token: code, type: "sms" });
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      startTransition(() => {
+        router.push("/");
+        router.refresh();
+      });
+    });
   }
 
   return (
@@ -179,12 +185,14 @@ export function LoginForm({ initialError = null }: { initialError?: string | nul
 
           <button
             onClick={handleGoogleSignIn}
-            disabled={googleLoading}
+            disabled={busy}
             className="flex items-center justify-center gap-3 rounded-2xl bg-white py-3.5 text-[15px] font-semibold shadow-lg disabled:opacity-60"
             style={{ color: "var(--kb-ink)" }}
           >
-            <GoogleIcon />
-            {googleLoading ? "Redirecting…" : intent === "signup" ? "Sign up with Google" : "Sign in with Google"}
+            <PendingLabel pending={isRunning("google")} pendingText="Redirecting…">
+              <GoogleIcon />
+              {intent === "signup" ? "Sign up with Google" : "Sign in with Google"}
+            </PendingLabel>
           </button>
 
           <div className="my-5 flex items-center gap-3">
@@ -214,11 +222,13 @@ export function LoginForm({ initialError = null }: { initialError?: string | nul
               </div>
               <button
                 type="submit"
-                disabled={loading || phone.length < 8}
+                disabled={busy || phone.length < 8}
                 className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
                 style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
               >
-                {loading ? "Sending code…" : intent === "signup" ? "Send sign-up code" : "Send sign-in code"}
+                <PendingLabel pending={isRunning("send")} pendingText="Sending code…">
+                  {intent === "signup" ? "Send sign-up code" : "Send sign-in code"}
+                </PendingLabel>
               </button>
               <p className="pt-1 text-center text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>
                 {intent === "signin" ? "New to Kopi Boy? " : "Already have an account? "}
@@ -249,11 +259,11 @@ export function LoginForm({ initialError = null }: { initialError?: string | nul
               />
               <button
                 type="submit"
-                disabled={loading}
+                disabled={busy}
                 className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
                 style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
               >
-                {loading ? "Verifying…" : "Verify & continue"}
+                <PendingLabel pending={isRunning("verify")} pendingText="Verifying…">Verify & continue</PendingLabel>
               </button>
               <button
                 type="button"

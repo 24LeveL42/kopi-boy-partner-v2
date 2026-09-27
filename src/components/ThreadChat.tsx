@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { usePendingAction } from "@/lib/use-pending-action";
+import { PendingLabel } from "./Pending";
 import type { ChatMessage } from "@/lib/types-messages";
 import {
   MESSAGE_BODY_MAX_LENGTH,
@@ -46,7 +48,7 @@ export function ThreadChat({ config, threadId, userId }: { config: ThreadChatCon
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
-  const [sending, setSending] = useState(false);
+  const { busy: sending, run } = usePendingAction();
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -131,32 +133,31 @@ export function ThreadChat({ config, threadId, userId }: { config: ThreadChatCon
     setPhoto(file);
   }
 
-  async function send() {
+  function send() {
     const body = normalizeOrderChatBody(draft, photo !== null);
     if (body === null || sending) return;
-    setSending(true);
-    setError(null);
+    run("send", async () => {
+      setError(null);
 
-    let photoPath: string | null = null;
-    if (photo) {
-      photoPath = await uploadChatPhoto(supabase, bucket, threadId, userId, photo);
-      if (!photoPath) {
-        setSending(false);
-        setError("Photo couldn't be uploaded — please try again.");
+      let photoPath: string | null = null;
+      if (photo) {
+        photoPath = await uploadChatPhoto(supabase, bucket, threadId, userId, photo);
+        if (!photoPath) {
+          setError("Photo couldn't be uploaded — please try again.");
+          return;
+        }
+      }
+
+      const { error: sendError } = await supabase
+        .from(table)
+        .insert({ [threadColumn]: threadId, sender_id: userId, body, photo_path: photoPath });
+      if (sendError) {
+        setError(sendError.message);
         return;
       }
-    }
-
-    const { error: sendError } = await supabase
-      .from(table)
-      .insert({ [threadColumn]: threadId, sender_id: userId, body, photo_path: photoPath });
-    setSending(false);
-    if (sendError) {
-      setError(sendError.message);
-      return;
-    }
-    setDraft("");
-    setPhoto(null);
+      setDraft("");
+      setPhoto(null);
+    });
   }
 
   const canSend = !sending && normalizeOrderChatBody(draft, photo !== null) !== null;
@@ -220,7 +221,13 @@ export function ThreadChat({ config, threadId, userId }: { config: ThreadChatCon
           style={{ background: "var(--kb-cream)" }}
         >
           <span className="truncate">📎 {photo.name}</span>
-          <button type="button" onClick={() => setPhoto(null)} className="shrink-0 font-semibold" style={{ color: "var(--kb-danger)" }}>
+          <button
+            type="button"
+            onClick={() => setPhoto(null)}
+            disabled={sending}
+            className="shrink-0 font-semibold disabled:opacity-60"
+            style={{ color: "var(--kb-danger)" }}
+          >
             Remove
           </button>
         </div>
@@ -249,20 +256,21 @@ export function ThreadChat({ config, threadId, userId }: { config: ThreadChatCon
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void send();
+            if (e.key === "Enter") send();
           }}
+          readOnly={sending} // what's typed now would be wiped when the send lands
           placeholder={config.placeholder}
           maxLength={MESSAGE_BODY_MAX_LENGTH}
           className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm"
           style={{ borderColor: "var(--kb-navy-line)", color: "var(--kb-ink)" }}
         />
         <button
-          onClick={() => void send()}
+          onClick={send}
           disabled={!canSend}
           className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
           style={{ background: "var(--kb-purple)" }}
         >
-          {sending ? "Sending…" : "Send"}
+          <PendingLabel pending={sending} pendingText="Sending…">Send</PendingLabel>
         </button>
       </div>
     </div>

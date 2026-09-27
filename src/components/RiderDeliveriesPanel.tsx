@@ -3,8 +3,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
+import { usePendingAction } from "@/lib/use-pending-action";
 import type { DeliveryRequestWithKitchen } from "@/lib/types-delivery";
 import { OrderChat } from "@/components/OrderChat";
+import { PendingLabel } from "@/components/Pending";
+import { SkeletonCards } from "@/components/Skeleton";
 import { ORDER_CHAT_PHOTO_TYPES, uploadOrderChatPhoto, validateOrderChatPhoto } from "@/lib/order-chat-photo";
 
 interface RawRow {
@@ -43,8 +46,8 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
   const [openRequests, setOpenRequests] = useState<DeliveryRequestWithKitchen[]>([]);
   const [myDelivery, setMyDelivery] = useState<DeliveryRequestWithKitchen | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { busy, isRunning, run } = usePendingAction();
   // Proof-of-delivery step: "Mark delivered" opens it, and completing needs a photo.
   const [proofOpen, setProofOpen] = useState(false);
   const [proofPhoto, setProofPhoto] = useState<File | null>(null);
@@ -108,20 +111,20 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
   // Open requests are visible to every rider (RLS scopes it), so no filter.
   useLiveRefresh([{ table: "delivery_requests" }], () => void load(true));
 
-  async function accept(requestId: string) {
-    setBusyId(requestId);
-    setError(null);
-    const { error: acceptError } = await supabase
-      .from("delivery_requests")
-      .update({ rider_id: riderId, status: "accepted", accepted_at: new Date().toISOString() })
-      .eq("id", requestId)
-      .eq("status", "open"); // first to accept wins — a second rider's update matches 0 rows
-    setBusyId(null);
-    if (acceptError) {
-      setError(acceptError.message);
-      return;
-    }
-    load();
+  function accept(requestId: string) {
+    run(`${requestId}:accept`, async () => {
+      setError(null);
+      const { error: acceptError } = await supabase
+        .from("delivery_requests")
+        .update({ rider_id: riderId, status: "accepted", accepted_at: new Date().toISOString() })
+        .eq("id", requestId)
+        .eq("status", "open"); // first to accept wins — a second rider's update matches 0 rows
+      if (acceptError) {
+        setError(acceptError.message);
+        return;
+      }
+      await load(true);
+    });
   }
 
   const proofPreviewRef = useRef<string | null>(null);
@@ -159,37 +162,38 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
   // Upload first (the chat, and so the bucket, is only open while the delivery
   // is accepted), then post the photo message and complete the delivery in one
   // transaction — see complete_delivery_with_proof in docs/supabase-messages.sql.
-  async function markDelivered() {
+  function markDelivered() {
     if (!myDelivery || !proofPhoto) return;
-    setBusyId(myDelivery.id);
-    setError(null);
+    const delivery = myDelivery;
+    const photo = proofPhoto;
+    run(`${delivery.id}:deliver`, async () => {
+      setError(null);
 
-    let path = proofPath;
-    if (!path) {
-      path = await uploadOrderChatPhoto(supabase, myDelivery.order_id, riderId, proofPhoto);
+      let path = proofPath;
       if (!path) {
-        setBusyId(null);
-        setError("Photo couldn't be uploaded — the delivery is not marked delivered yet. Please try again.");
+        path = await uploadOrderChatPhoto(supabase, delivery.order_id, riderId, photo);
+        if (!path) {
+          setError("Photo couldn't be uploaded — the delivery is not marked delivered yet. Please try again.");
+          return;
+        }
+        setProofPath(path);
+      }
+
+      const { error: deliveredError } = await supabase.rpc("complete_delivery_with_proof", {
+        p_request_id: delivery.id,
+        p_photo_path: path,
+      });
+      if (deliveredError) {
+        setError(`${deliveredError.message} The delivery is not marked delivered yet.`);
         return;
       }
-      setProofPath(path);
-    }
-
-    const { error: deliveredError } = await supabase.rpc("complete_delivery_with_proof", {
-      p_request_id: myDelivery.id,
-      p_photo_path: path,
+      closeProof();
+      await load(true);
     });
-    setBusyId(null);
-    if (deliveredError) {
-      setError(`${deliveredError.message} The delivery is not marked delivered yet.`);
-      return;
-    }
-    closeProof();
-    load();
   }
 
   if (loading) {
-    return <p className="mt-2 text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>Loading…</p>;
+    return <SkeletonCards count={2} />;
   }
 
   return (
@@ -238,7 +242,7 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
                     <button
                       type="button"
                       onClick={() => setProof(null)}
-                      disabled={busyId === myDelivery.id}
+                      disabled={busy}
                       className="shrink-0 font-semibold disabled:opacity-60"
                       style={{ color: "var(--kb-danger)" }}
                     >
@@ -250,7 +254,8 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
                 <button
                   type="button"
                   onClick={() => proofInputRef.current?.click()}
-                  className="mt-2 w-full rounded-xl border border-dashed py-3 text-sm font-semibold"
+                  disabled={busy}
+                  className="mt-2 w-full rounded-xl border border-dashed py-3 text-sm font-semibold disabled:opacity-60"
                   style={{ borderColor: "var(--kb-navy-line)", color: "var(--kb-ink-soft)" }}
                 >
                   Attach photo
@@ -258,17 +263,19 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
               )}
 
               <button
-                onClick={() => void markDelivered()}
-                disabled={!proofPhoto || busyId === myDelivery.id}
+                onClick={markDelivered}
+                disabled={!proofPhoto || busy}
                 className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold text-white disabled:opacity-60"
                 style={{ background: "var(--kb-green-deep)" }}
               >
-                {busyId === myDelivery.id ? "Saving…" : proofPhoto ? "Confirm delivered" : "Attach a photo to confirm"}
+                <PendingLabel pending={isRunning(`${myDelivery.id}:deliver`)} pendingText="Confirming delivery…">
+                  {proofPhoto ? "Confirm delivered" : "Attach a photo to confirm"}
+                </PendingLabel>
               </button>
               <button
                 type="button"
                 onClick={closeProof}
-                disabled={busyId === myDelivery.id}
+                disabled={busy}
                 className="mt-2 w-full text-xs font-semibold disabled:opacity-60"
                 style={{ color: "var(--kb-ink-soft)" }}
               >
@@ -305,11 +312,11 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
                   <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>Order #{shortId(r.order_id)}</p>
                   <button
                     onClick={() => accept(r.id)}
-                    disabled={busyId === r.id}
+                    disabled={busy}
                     className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                     style={{ background: "var(--kb-purple)" }}
                   >
-                    {busyId === r.id ? "Accepting…" : "Accept"}
+                    <PendingLabel pending={isRunning(`${r.id}:accept`)} pendingText="Accepting…">Accept</PendingLabel>
                   </button>
                 </div>
               ))}
@@ -317,11 +324,12 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
           )}
 
           <button
-            onClick={() => void load()}
-            className="mt-3 w-full rounded-2xl py-2.5 text-sm font-semibold"
+            onClick={() => run("refresh", () => load(true))}
+            disabled={busy}
+            className="mt-3 w-full rounded-2xl py-2.5 text-sm font-semibold disabled:opacity-60"
             style={{ background: "var(--kb-navy-raised)", color: "var(--kb-on-navy)" }}
           >
-            Refresh
+            <PendingLabel pending={isRunning("refresh")} pendingText="Refreshing…">Refresh</PendingLabel>
           </button>
         </>
       )}

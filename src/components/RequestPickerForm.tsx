@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { usePendingAction } from "@/lib/use-pending-action";
 import type { PickupRequestWithKitchen } from "@/lib/types-picker";
+import { PendingLabel } from "./Pending";
 import { PickupChat } from "./PickupChat";
 
 interface KitchenOption {
@@ -31,27 +33,26 @@ export function RequestPickerForm({
   const supabase = createClient();
   const router = useRouter();
   const [kitchenId, setKitchenId] = useState(kitchens[0]?.id ?? "");
-  const [loading, setLoading] = useState(false);
+  const { busy: loading, run, startTransition } = usePendingAction();
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!kitchenId) return;
-    setLoading(true);
-    setError(null);
 
-    const { error: insertError } = await supabase.from("pickup_requests").insert({
-      rider_id: userId,
-      kitchen_id: kitchenId,
+    run("request", async () => {
+      setError(null);
+      const { error: insertError } = await supabase.from("pickup_requests").insert({
+        rider_id: userId,
+        kitchen_id: kitchenId,
+      });
+      if (insertError) {
+        setError(insertError.message);
+        return;
+      }
+      // Busy until the refreshed page swaps this form for the request card.
+      startTransition(() => router.refresh());
     });
-
-    setLoading(false);
-    if (insertError) {
-      setError(insertError.message);
-      return;
-    }
-
-    router.refresh();
   }
 
   const openOrActive = myRequests.filter((r) => r.status === "open" || r.status === "accepted");
@@ -105,7 +106,7 @@ export function RequestPickerForm({
             className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold text-white disabled:opacity-60"
             style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
           >
-            {loading ? "Requesting…" : "Request a picker"}
+            <PendingLabel pending={loading} pendingText="Requesting…">Request a picker</PendingLabel>
           </button>
           {error && (
             <p className="mt-2 rounded-xl px-3 py-2 text-xs" style={{ background: "rgba(239,68,68,0.15)", color: "#B91C1C" }}>

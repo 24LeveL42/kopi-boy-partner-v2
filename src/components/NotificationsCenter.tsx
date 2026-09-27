@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useNotifications } from "./NotificationsProvider";
+import { PendingLabel } from "./Pending";
 import { readLastPush, type LastPush } from "@/lib/push-client";
+import { usePendingAction } from "@/lib/use-pending-action";
 import { BROADCAST_ROLES, CATEGORIES_BY_ROLE, type AppNotification } from "@/lib/types-notifications";
 
 function timeAgo(iso: string) {
@@ -60,6 +62,7 @@ export function NotificationsCenter({ role }: { role: string }) {
   const router = useRouter();
   const { items, unreadCount, markRead, markAllRead, prefs, updatePrefs, pushState, pushError, turnOnPush, turnOffPush } =
     useNotifications();
+  const push = usePendingAction();
 
   // Re-read when the app comes back to the front, so "background it, send a
   // push, return" shows whether the service worker handled that push.
@@ -95,15 +98,18 @@ export function NotificationsCenter({ role }: { role: string }) {
         {(pushState === "off" || pushState === "on") && (
           <button
             type="button"
-            onClick={pushState === "off" ? turnOnPush : turnOffPush}
-            className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold"
+            onClick={() => push.run("push", pushState === "off" ? turnOnPush : turnOffPush)}
+            disabled={push.busy}
+            className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold disabled:opacity-60"
             style={
               pushState === "off"
                 ? { background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)", color: "white" }
                 : { background: "var(--kb-cream)", color: "var(--kb-ink)" }
             }
           >
-            {pushState === "off" ? "Turn on notifications" : "Turn off notifications"}
+            <PendingLabel pending={push.busy} pendingText={pushState === "off" ? "Turning on…" : "Turning off…"}>
+              {pushState === "off" ? "Turn on notifications" : "Turn off notifications"}
+            </PendingLabel>
           </button>
         )}
         {pushState === "on" && (

@@ -3,8 +3,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
+import { usePendingAction } from "@/lib/use-pending-action";
 import { TopBar } from "./TopBar";
 import { PickupChat } from "./PickupChat";
+import { PendingLabel } from "./Pending";
+import { SkeletonCards } from "./Skeleton";
 import { ProfileSummaryCard, type ProfileSummary } from "./ProfileSummaryCard";
 import type { PickupRequestWithKitchen } from "@/lib/types-picker";
 
@@ -42,8 +45,8 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
   const [openRequests, setOpenRequests] = useState<PickupRequestWithKitchen[]>([]);
   const [myPickup, setMyPickup] = useState<PickupRequestWithKitchen | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { busy, isRunning, run } = usePendingAction();
 
   // `silent` = live refresh: update in place without flashing the loading state.
   const load = useCallback(async (silent?: boolean) => {
@@ -85,36 +88,37 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
 
   useLiveRefresh([{ table: "pickup_requests" }], () => void load(true));
 
-  async function accept(requestId: string) {
-    setBusyId(requestId);
-    setError(null);
-    const { error: acceptError } = await supabase
-      .from("pickup_requests")
-      .update({ picker_id: userId, status: "accepted", accepted_at: new Date().toISOString() })
-      .eq("id", requestId)
-      .eq("status", "open"); // first to accept wins — a second picker's update matches 0 rows
-    setBusyId(null);
-    if (acceptError) {
-      setError(acceptError.message);
-      return;
-    }
-    load();
+  function accept(requestId: string) {
+    run(`${requestId}:accept`, async () => {
+      setError(null);
+      const { error: acceptError } = await supabase
+        .from("pickup_requests")
+        .update({ picker_id: userId, status: "accepted", accepted_at: new Date().toISOString() })
+        .eq("id", requestId)
+        .eq("status", "open"); // first to accept wins — a second picker's update matches 0 rows
+      if (acceptError) {
+        setError(acceptError.message);
+        return;
+      }
+      await load(true);
+    });
   }
 
-  async function completeHandoff() {
+  function completeHandoff() {
     if (!myPickup) return;
-    setBusyId(myPickup.id);
-    setError(null);
-    const { error: completeError } = await supabase
-      .from("pickup_requests")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
-      .eq("id", myPickup.id);
-    setBusyId(null);
-    if (completeError) {
-      setError(completeError.message);
-      return;
-    }
-    load();
+    const pickupId = myPickup.id;
+    run(`${pickupId}:complete`, async () => {
+      setError(null);
+      const { error: completeError } = await supabase
+        .from("pickup_requests")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", pickupId);
+      if (completeError) {
+        setError(completeError.message);
+        return;
+      }
+      await load(true);
+    });
   }
 
   return (
@@ -149,11 +153,11 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
           </p>
           <button
             onClick={completeHandoff}
-            disabled={busyId === myPickup.id}
+            disabled={busy}
             className="mt-3 w-full rounded-2xl py-3 text-sm font-semibold text-white disabled:opacity-60"
             style={{ background: "var(--kb-green-deep)" }}
           >
-            {busyId === myPickup.id ? "Saving…" : "Mark handoff complete"}
+            <PendingLabel pending={isRunning(`${myPickup.id}:complete`)} pendingText="Completing…">Mark handoff complete</PendingLabel>
           </button>
 
           <PickupChat pickupRequestId={myPickup.id} userId={userId} as="picker" />
@@ -165,7 +169,9 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
           </p>
 
           {loading ? (
-            <p className="mt-4 text-sm" style={{ color: "var(--kb-on-navy-soft)" }}>Loading…</p>
+            <div className="mt-4">
+              <SkeletonCards count={2} />
+            </div>
           ) : openRequests.length === 0 ? (
             <p className="mt-4 rounded-2xl bg-white p-4 text-sm" style={{ color: "var(--kb-ink-soft)" }}>
               No open requests right now — check back later.
@@ -181,11 +187,11 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
                   </p>
                   <button
                     onClick={() => accept(r.id)}
-                    disabled={busyId === r.id}
+                    disabled={busy}
                     className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                     style={{ background: "var(--kb-purple)" }}
                   >
-                    {busyId === r.id ? "Accepting…" : "Accept"}
+                    <PendingLabel pending={isRunning(`${r.id}:accept`)} pendingText="Accepting…">Accept</PendingLabel>
                   </button>
                 </div>
               ))}
@@ -193,11 +199,12 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
           )}
 
           <button
-            onClick={() => void load()}
-            className="mt-4 w-full rounded-2xl py-2.5 text-sm font-semibold"
+            onClick={() => run("refresh", () => load(true))}
+            disabled={busy}
+            className="mt-4 w-full rounded-2xl py-2.5 text-sm font-semibold disabled:opacity-60"
             style={{ background: "var(--kb-navy-raised)", color: "var(--kb-on-navy)" }}
           >
-            Refresh
+            <PendingLabel pending={isRunning("refresh")} pendingText="Refreshing…">Refresh</PendingLabel>
           </button>
         </>
       )}

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { usePendingAction } from "@/lib/use-pending-action";
+import { PendingLabel, Spinner } from "./Pending";
 import { Logo } from "./Logo";
 import { PartnerMenu } from "./PartnerMenu";
 import { useBackHandler, useCancelHandler } from "./AppChrome";
@@ -94,7 +96,7 @@ export function KitchenSetupForm({
       ? existingItems.map((i) => ({ key: i.id, name: i.name, price: String(i.price), photo_url: i.photo_url ?? "", photoUploading: false }))
       : [emptyItem()]
   );
-  const [loading, setLoading] = useState(false);
+  const { busy: loading, run, startTransition } = usePendingAction();
   const [error, setError] = useState<string | null>(null);
   // Set on the first edit of any field — decides whether leaving needs a
   // "discard?" confirmation.
@@ -201,7 +203,7 @@ export function KitchenSetupForm({
     setItems((prev) => prev.filter((it) => it.key !== key));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -218,57 +220,57 @@ export function KitchenSetupForm({
       return;
     }
 
-    setLoading(true);
+    run("save", async () => {
+      try {
+        const { error: kitchenError } = await supabase.from("kitchens").upsert({
+          id: userId,
+          business_name: businessName.trim(),
+          category,
+          cuisine_type: cuisineType,
+          neighbourhood: neighbourhood.trim(),
+          description: description.trim() || null,
+          hero_image: heroImage.trim() || null,
+          paynow_type: paynowType,
+          paynow_value: paynowValue.trim() || null,
+          latitude,
+          longitude,
+          is_live: true,
+        });
+        if (kitchenError) throw kitchenError;
 
-    try {
-      const { error: kitchenError } = await supabase.from("kitchens").upsert({
-        id: userId,
-        business_name: businessName.trim(),
-        category,
-        cuisine_type: cuisineType,
-        neighbourhood: neighbourhood.trim(),
-        description: description.trim() || null,
-        hero_image: heroImage.trim() || null,
-        paynow_type: paynowType,
-        paynow_value: paynowValue.trim() || null,
-        latitude,
-        longitude,
-        is_live: true,
-      });
-      if (kitchenError) throw kitchenError;
+        // Replace-all on every save — simplest correct approach at this scope.
+        const { error: deleteError } = await supabase.from("menu_items").delete().eq("kitchen_id", userId);
+        if (deleteError) throw deleteError;
 
-      // Replace-all on every save — simplest correct approach at this scope.
-      const { error: deleteError } = await supabase.from("menu_items").delete().eq("kitchen_id", userId);
-      if (deleteError) throw deleteError;
+        const { error: itemsError } = await supabase.from("menu_items").insert(
+          validItems.map((it) => ({
+            kitchen_id: userId,
+            name: it.name,
+            price: it.price,
+            photo_url: it.photo_url.trim() || null,
+          }))
+        );
+        if (itemsError) throw itemsError;
 
-      const { error: itemsError } = await supabase.from("menu_items").insert(
-        validItems.map((it) => ({
-          kitchen_id: userId,
-          name: it.name,
-          price: it.price,
-          photo_url: it.photo_url.trim() || null,
-        }))
-      );
-      if (itemsError) throw itemsError;
-
-      if (isEdit) {
-        // Editing happens on a separate /kitchen route — navigate back to
-        // the dashboard.
-        router.push("/");
-        router.refresh();
-      } else {
-        // First-time setup is rendered directly at "/" (see src/app/page.tsx),
-        // so we're already on the target URL — router.push("/") to the
-        // current URL is a same-route no-op here and won't pick up the
-        // fresh kitchen row. refresh() alone re-renders this route with the
-        // now-existing kitchen, which sends the cook to the dashboard.
-        router.refresh();
+        if (isEdit) {
+          // Editing happens on a separate /kitchen route — navigate back to
+          // the dashboard.
+          startTransition(() => {
+            router.push("/");
+            router.refresh();
+          });
+        } else {
+          // First-time setup is rendered directly at "/" (see src/app/page.tsx),
+          // so we're already on the target URL — router.push("/") to the
+          // current URL is a same-route no-op here and won't pick up the
+          // fresh kitchen row. refresh() alone re-renders this route with the
+          // now-existing kitchen, which sends the cook to the dashboard.
+          startTransition(() => router.refresh());
+        }
+      } catch (err) {
+        setError(describeSupabaseError(err));
       }
-    } catch (err) {
-      setError(describeSupabaseError(err));
-    } finally {
-      setLoading(false);
-    }
+    });
   }
 
   return (
@@ -343,7 +345,7 @@ export function KitchenSetupForm({
               className="w-full rounded-xl border px-3 py-2.5 text-sm font-medium disabled:opacity-60"
               style={{ borderColor: "#E5E7EB", color: "var(--kb-purple)" }}
             >
-              {locationStatus === "locating" ? "Getting your location…" : "Use my current location"}
+              <PendingLabel pending={locationStatus === "locating"} pendingText="Getting your location…">Use my current location</PendingLabel>
             </button>
             {locationStatus === "success" && latitude != null && longitude != null && (
               <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
@@ -391,7 +393,8 @@ export function KitchenSetupForm({
               />
             </div>
             {heroUploading && (
-              <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+              <p className="mt-1 flex items-center gap-1.5 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                <Spinner size={12} />
                 Uploading…
               </p>
             )}
@@ -469,7 +472,8 @@ export function KitchenSetupForm({
                   className="w-full text-xs"
                 />
                 {it.photoUploading && (
-                  <span className="shrink-0 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
+                    <Spinner size={12} />
                     Uploading…
                   </span>
                 )}
@@ -490,7 +494,9 @@ export function KitchenSetupForm({
           className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
           style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
         >
-          {loading ? "Saving…" : isEdit ? "Save changes" : "Go live"}
+          <PendingLabel pending={loading} pendingText={isEdit ? "Saving changes…" : "Going live…"}>
+            {isEdit ? "Save changes" : "Go live"}
+          </PendingLabel>
         </button>
         <button
           type="button"

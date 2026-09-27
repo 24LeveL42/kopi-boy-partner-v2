@@ -3,16 +3,18 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { usePendingAction } from "@/lib/use-pending-action";
 import { PartnerRole } from "@/lib/types";
 import { businessUenProblem, normalizeBusinessUen, requiresBusinessUen } from "@/lib/business-uen";
 import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
+import { PendingLabel } from "./Pending";
 import { PhotoPicker } from "./PhotoPicker";
 import { SignOutButton } from "./SignOutButton";
 
 export function ApplyForm({ userId }: { userId: string }) {
   const [roleChoice, setRoleChoice] = useState<PartnerRole | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { busy: loading, run, startTransition } = usePendingAction();
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
@@ -43,14 +45,12 @@ export function ApplyForm({ userId }: { userId: string }) {
   // Global Back steps from a role's form to the role picker.
   useBackHandler(roleChoice ? () => setRoleChoice(null) : null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
 
     if (!fullName.trim() || !contactNumber.trim()) {
       setError("Please fill in your full name and contact number.");
-      setLoading(false);
       return;
     }
 
@@ -58,72 +58,71 @@ export function ApplyForm({ userId }: { userId: string }) {
       const uenProblem = businessUenProblem(businessType, businessUen);
       if (uenProblem) {
         setError(uenProblem);
-        setLoading(false);
         return;
       }
     }
 
-    const { error: profileError } = await supabase
-      .from("profiles")
-      .update({
-        full_name: fullName.trim(),
-        phone: contactNumber.trim(),
-        // A rider's or picker's photo also seeds their live profile photo, so
-        // it carries over on approval; they can change it later from /account.
-        ...((roleChoice === "rider" || roleChoice === "picker") && photoUrl ? { photo_url: photoUrl } : {}),
-      })
-      .eq("id", userId);
+    run("submit", async () => {
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({
+          full_name: fullName.trim(),
+          phone: contactNumber.trim(),
+          // A rider's or picker's photo also seeds their live profile photo, so
+          // it carries over on approval; they can change it later from /account.
+          ...((roleChoice === "rider" || roleChoice === "picker") && photoUrl ? { photo_url: photoUrl } : {}),
+        })
+        .eq("id", userId);
 
-    if (profileError) {
-      setError(profileError.message);
-      setLoading(false);
-      return;
-    }
-
-    if (roleChoice === "cook") {
-      const { error } = await supabase.from("cook_applications").insert({
-        user_id: userId,
-        business_name: businessName,
-        business_type: businessType,
-        neighbourhood,
-        description,
-        paynow_uen: paynowUen,
-        // Home cooks don't register a business, so they never send one (the
-        // insert trigger also clears it for them).
-        business_uen: requiresBusinessUen(businessType) ? normalizeBusinessUen(businessUen) : null,
-      });
-      if (error) {
-        setError(error.message);
-        setLoading(false);
+      if (profileError) {
+        setError(profileError.message);
         return;
       }
-    } else if (roleChoice === "rider") {
-      const { error } = await supabase.from("rider_applications").insert({
-        user_id: userId,
-        vehicle_type: vehicleType,
-        license_plate: licensePlate,
-        photo_url: photoUrl,
-      });
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-    } else if (roleChoice === "picker") {
-      const { error } = await supabase.from("picker_applications").insert({
-        user_id: userId,
-        note: pickerNote || null,
-        photo_url: photoUrl,
-      });
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-    }
 
-    router.push("/");
-    router.refresh();
+      if (roleChoice === "cook") {
+        const { error } = await supabase.from("cook_applications").insert({
+          user_id: userId,
+          business_name: businessName,
+          business_type: businessType,
+          neighbourhood,
+          description,
+          paynow_uen: paynowUen,
+          // Home cooks don't register a business, so they never send one (the
+          // insert trigger also clears it for them).
+          business_uen: requiresBusinessUen(businessType) ? normalizeBusinessUen(businessUen) : null,
+        });
+        if (error) {
+          setError(error.message);
+          return;
+        }
+      } else if (roleChoice === "rider") {
+        const { error } = await supabase.from("rider_applications").insert({
+          user_id: userId,
+          vehicle_type: vehicleType,
+          license_plate: licensePlate,
+          photo_url: photoUrl,
+        });
+        if (error) {
+          setError(error.message);
+          return;
+        }
+      } else if (roleChoice === "picker") {
+        const { error } = await supabase.from("picker_applications").insert({
+          user_id: userId,
+          note: pickerNote || null,
+          photo_url: photoUrl,
+        });
+        if (error) {
+          setError(error.message);
+          return;
+        }
+      }
+
+      startTransition(() => {
+        router.push("/");
+        router.refresh();
+      });
+    });
   }
 
   if (!roleChoice) {
@@ -285,7 +284,7 @@ export function ApplyForm({ userId }: { userId: string }) {
           className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
           style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
         >
-          {loading ? "Submitting…" : "Submit application"}
+          <PendingLabel pending={loading} pendingText="Submitting…">Submit application</PendingLabel>
         </button>
 
         {error && (
