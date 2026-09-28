@@ -9,18 +9,12 @@ import { Logo } from "./Logo";
 import { PartnerMenu } from "./PartnerMenu";
 import { useBackHandler, useCancelHandler } from "./AppChrome";
 import type { Kitchen, MenuItem, MerchantCategory, CuisineType, PaynowType } from "@/lib/types-kitchen";
+import type { KitchenDefaults } from "@/lib/partner-routing";
+import { KITCHEN_TERMS, MERCHANT_CATEGORIES, isValidPostalCode } from "@/lib/kitchen-profile";
 
 const PAYNOW_TYPES: { id: PaynowType; label: string }[] = [
   { id: "mobile", label: "PayNow Mobile Number" },
   { id: "uen", label: "PayNow UEN" },
-];
-
-const CATEGORIES: { id: MerchantCategory; label: string }[] = [
-  { id: "home-cook", label: "Home Cook" },
-  { id: "hawker", label: "Hawker" },
-  { id: "bakery", label: "Bakery" },
-  { id: "bulk-orders", label: "Bulk Orders" },
-  { id: "drinks", label: "Desserts & Drinks" },
 ];
 
 const CUISINES: { id: CuisineType; label: string }[] = [
@@ -69,7 +63,7 @@ export function KitchenSetupForm({
   onCancel,
 }: {
   userId: string;
-  defaults: { business_name: string; neighbourhood: string; description: string };
+  defaults: KitchenDefaults;
   existingKitchen?: Kitchen | null;
   existingItems?: MenuItem[];
   /** Where Cancel goes. Defaults to Home; first-time setup (which *is* Home) passes its own. */
@@ -80,17 +74,24 @@ export function KitchenSetupForm({
   const supabase = createClient();
 
   const [businessName, setBusinessName] = useState(existingKitchen?.business_name ?? defaults.business_name);
-  const [category, setCategory] = useState<MerchantCategory>(existingKitchen?.category ?? "home-cook");
+  const [category, setCategory] = useState<MerchantCategory>(existingKitchen?.category ?? defaults.category);
   const [cuisineType, setCuisineType] = useState<CuisineType>(existingKitchen?.cuisine_type ?? "chinese");
-  const [neighbourhood, setNeighbourhood] = useState(existingKitchen?.neighbourhood ?? defaults.neighbourhood);
+  const [isHalal, setIsHalal] = useState(existingKitchen?.is_halal ?? false);
+  const [businessAddress, setBusinessAddress] = useState(defaults.business_address);
+  const [postalCode, setPostalCode] = useState(defaults.postal_code);
   const [description, setDescription] = useState(existingKitchen?.description ?? defaults.description ?? "");
   const [heroImage, setHeroImage] = useState(existingKitchen?.hero_image ?? "");
   const [heroUploading, setHeroUploading] = useState(false);
   const [paynowType, setPaynowType] = useState<PaynowType>(existingKitchen?.paynow_type ?? "mobile");
   const [paynowValue, setPaynowValue] = useState(existingKitchen?.paynow_value ?? "");
-  const [latitude, setLatitude] = useState<number | null>(existingKitchen?.latitude ?? null);
-  const [longitude, setLongitude] = useState<number | null>(existingKitchen?.longitude ?? null);
+  const [latitude, setLatitude] = useState<number | null>(defaults.latitude);
+  const [longitude, setLongitude] = useState<number | null>(defaults.longitude);
   const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
+  // Once acknowledged it stays acknowledged (the DB keeps the first
+  // timestamp — schema section 33), so the box only gates kitchens that
+  // haven't ticked it yet, including ones set up before it existed.
+  const alreadyAcknowledged = !!existingKitchen?.acknowledged_terms_at;
+  const [acknowledged, setAcknowledged] = useState(alreadyAcknowledged);
   const [items, setItems] = useState<DraftItem[]>(
     existingItems && existingItems.length > 0
       ? existingItems.map((i) => ({ key: i.id, name: i.name, price: String(i.price), photo_url: i.photo_url ?? "", photoUploading: false }))
@@ -165,7 +166,7 @@ export function KitchenSetupForm({
     }
   }
 
-  // Optional — purely additive alongside the neighbourhood text field. Never
+  // Optional — purely additive alongside the address fields. Never
   // blocks kitchen setup: every failure path (no browser support, denied
   // permission, position unavailable/timeout) just resets to a message and
   // leaves latitude/longitude null.
@@ -211,8 +212,16 @@ export function KitchenSetupForm({
       .map((it) => ({ ...it, name: it.name.trim(), price: parseFloat(it.price) }))
       .filter((it) => it.name.length > 0 && !Number.isNaN(it.price) && it.price > 0);
 
-    if (!businessName.trim() || !neighbourhood.trim()) {
-      setError("Business name and neighbourhood are required.");
+    if (!businessName.trim() || !businessAddress.trim()) {
+      setError("Business name and business address are required.");
+      return;
+    }
+    if (!isValidPostalCode(postalCode)) {
+      setError("Postal code must be 6 digits (e.g. 310123).");
+      return;
+    }
+    if (!acknowledged) {
+      setError("Please tick the acknowledgement before saving.");
       return;
     }
     if (validItems.length === 0) {
@@ -227,16 +236,31 @@ export function KitchenSetupForm({
           business_name: businessName.trim(),
           category,
           cuisine_type: cuisineType,
-          neighbourhood: neighbourhood.trim(),
+          is_halal: isHalal,
           description: description.trim() || null,
           hero_image: heroImage.trim() || null,
           paynow_type: paynowType,
           paynow_value: paynowValue.trim() || null,
-          latitude,
-          longitude,
+          // Any non-null value means "ticked" — the DB stamps its own now()
+          // the first time and keeps that original timestamp afterwards.
+          acknowledged_terms_at: new Date().toISOString(),
           is_live: true,
         });
         if (kitchenError) throw kitchenError;
+
+        // Address, full postal code and exact coordinates are private, so they
+        // go in kitchen_addresses, never the publicly readable kitchens row;
+        // the DB derives the public postal sector + rounded coordinates from
+        // them (schema sections 28–29). Saved after the kitchen, since it
+        // references it.
+        const { error: addressError } = await supabase.from("kitchen_addresses").upsert({
+          kitchen_id: userId,
+          business_address: businessAddress.trim(),
+          postal_code: postalCode.trim(),
+          latitude,
+          longitude,
+        });
+        if (addressError) throw addressError;
 
         // Replace-all on every save — simplest correct approach at this scope.
         const { error: deleteError } = await supabase.from("menu_items").delete().eq("kitchen_id", userId);
@@ -307,7 +331,7 @@ export function KitchenSetupForm({
               className="w-full rounded-xl border px-3 py-2.5 text-sm"
               style={{ borderColor: "#E5E7EB" }}
             >
-              {CATEGORIES.map((c) => (
+              {MERCHANT_CATEGORIES.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.label}
                 </option>
@@ -328,11 +352,31 @@ export function KitchenSetupForm({
               ))}
             </select>
           </Field>
-          <Field label="Neighbourhood">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={isHalal} onChange={(e) => setIsHalal(e.target.checked)} className="h-4 w-4" />
+            Halal
+          </label>
+          <Field label="Business Address">
             <input
-              value={neighbourhood}
-              onChange={(e) => setNeighbourhood(e.target.value)}
+              value={businessAddress}
+              onChange={(e) => setBusinessAddress(e.target.value)}
               required
+              placeholder="e.g. Blk 123 Toa Payoh Lor 1, #01-23"
+              autoComplete="street-address"
+              className="w-full rounded-xl border px-3 py-2.5 text-sm"
+              style={{ borderColor: "#E5E7EB" }}
+            />
+          </Field>
+          <Field label="Postal Code">
+            <input
+              value={postalCode}
+              onChange={(e) => setPostalCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              required
+              placeholder="e.g. 310123"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              title="6-digit Singapore postal code"
+              autoComplete="postal-code"
               className="w-full rounded-xl border px-3 py-2.5 text-sm"
               style={{ borderColor: "#E5E7EB" }}
             />
@@ -354,7 +398,7 @@ export function KitchenSetupForm({
             )}
             {locationStatus === "denied" && (
               <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
-                Location permission was denied — that&apos;s fine, your neighbourhood text above is still used. You
+                Location permission was denied — that&apos;s fine, your address above is still used. You
                 can allow location access in your browser settings and try again any time.
               </p>
             )}
@@ -488,9 +532,23 @@ export function KitchenSetupForm({
           </p>
         )}
 
+        <label
+          className="flex items-start gap-3 rounded-2xl bg-white p-4 text-sm"
+          style={{ color: "var(--kb-ink)", opacity: alreadyAcknowledged ? 0.7 : 1 }}
+        >
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+            disabled={alreadyAcknowledged}
+            className="mt-0.5 h-4 w-4 shrink-0"
+          />
+          <span>{KITCHEN_TERMS}</span>
+        </label>
+
         <button
           type="submit"
-          disabled={loading || heroUploading || items.some((it) => it.photoUploading)}
+          disabled={loading || !acknowledged || heroUploading || items.some((it) => it.photoUploading)}
           className="w-full rounded-2xl py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
           style={{ background: "linear-gradient(90deg, var(--kb-purple) 0%, var(--kb-green) 100%)" }}
         >

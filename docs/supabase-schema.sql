@@ -1163,3 +1163,450 @@ create trigger after_cook_application_review
 update public.kitchens k
 set business_uen = null
 where public.approved_business_uen(k.id) is distinct from k.business_uen;
+
+
+-- ============================================================================
+-- KOPI BOY 2.0 — Cook registration: private location, business types, halal,
+-- terms
+-- Run this ONCE, after every script above, in the same Supabase project's
+-- SQL Editor. Safe to run on a database where an earlier draft of these
+-- sections (a public kitchens.business_address / kitchens.postal_code) was
+-- already run — section 28 migrates that data and removes those columns.
+-- Section 34 (dropping kitchens.neighbourhood) is deliberately left commented
+-- out — see its note before running it.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 28. PRIVATE KITCHEN LOCATION (address, postal code, exact coordinates)
+-- The free-text `neighbourhood` ("Toa Payoh") is replaced by a real street
+-- address plus a 6-digit Singapore postal code, captured on cook_applications
+-- at sign-up and seeded into the kitchen at setup.
+--
+-- Everything that pinpoints a home cook's home lives in kitchen_addresses,
+-- which only the owning cook and admins can read:
+--   * business_address — street address
+--   * postal_code      — full 6-digit code (in Singapore one code = one
+--                        building, so for a landed home it IS the house)
+--   * latitude/longitude — the exact coordinates from KitchenSetupForm's
+--                        "Use my current location"
+-- The assigned rider/picker gets them only through section 30's functions.
+-- The public kitchens row carries only coarse values derived from these by
+-- section 29's triggers: postal_sector (first 2 digits) and
+-- latitude/longitude rounded to 3 decimals (about 110 m).
+--
+-- Why a separate table rather than column-level grants on kitchens: RLS picks
+-- rows, never columns, and kitchens is readable by anon/authenticated via
+-- "Anyone can read live kitchens". Hiding columns there would need column
+-- grants, which make every `select *` on kitchens (the Partner app's own
+-- pages, and the Customer app) fail with "permission denied", and would also
+-- hide the values from the cook who owns them, since grants are per role,
+-- not per row. A separate table keeps `select *` working and lets RLS scope
+-- the data to its owner.
+--
+-- cook_applications already has own-row/admin-only read policies, so its
+-- business_address/postal_code columns are as private as the rest of the
+-- application.
+--
+-- The postal_code CHECKs only validate the format when a value is present (a
+-- NULL passes a CHECK), same rule as isValidPostalCode() in
+-- src/lib/kitchen-profile.ts. Everything is nullable: kitchens that predate
+-- this section have no address, and KitchenSetupForm requires address +
+-- postal code on the cook's next save.
+--
+-- Migrating from earlier states, all guarded so re-running is a no-op:
+--   * an earlier draft of this section put business_address and postal_code
+--     directly on kitchens (publicly readable) — their values are copied into
+--     kitchen_addresses and both columns are dropped;
+--   * kitchens.latitude/longitude (section 19) held exact coordinates — they
+--     are copied into kitchen_addresses before section 29 replaces the public
+--     ones with rounded values. Only copied where kitchen_addresses has none
+--     yet, so a re-run never overwrites exact values with rounded ones.
+--
+-- kitchens.neighbourhood was NOT NULL, and the Partner app no longer writes
+-- it, so it's relaxed here or every new kitchen insert would fail until
+-- section 34 drops it. cook_applications.neighbourhood was already nullable
+-- and is kept as historical data (HQ review may show it).
+-- ----------------------------------------------------------------------------
+alter table public.cook_applications add column if not exists business_address text;
+alter table public.cook_applications add column if not exists postal_code text;
+alter table public.cook_applications drop constraint if exists cook_applications_postal_code_check;
+alter table public.cook_applications add constraint cook_applications_postal_code_check
+  check (postal_code ~ '^[0-9]{6}$');
+
+create table if not exists public.kitchen_addresses (
+  kitchen_id uuid primary key references public.kitchens(id) on delete cascade,
+  business_address text,
+  postal_code text,
+  latitude numeric(9,6),
+  longitude numeric(9,6),
+  updated_at timestamptz not null default now()
+);
+
+-- For a database where an earlier draft created this table with fewer
+-- columns / a NOT NULL address.
+alter table public.kitchen_addresses add column if not exists postal_code text;
+alter table public.kitchen_addresses add column if not exists latitude numeric(9,6);
+alter table public.kitchen_addresses add column if not exists longitude numeric(9,6);
+alter table public.kitchen_addresses alter column business_address drop not null;
+alter table public.kitchen_addresses drop constraint if exists kitchen_addresses_postal_code_check;
+alter table public.kitchen_addresses add constraint kitchen_addresses_postal_code_check
+  check (postal_code ~ '^[0-9]{6}$');
+
+alter table public.kitchen_addresses enable row level security;
+
+-- select/insert/update for the owning cook, select for admins — no delete
+-- policy (rows only disappear via the kitchens-row cascade). anon gets
+-- nothing: revoked explicitly because Supabase's default privileges grant
+-- every new public table to anon.
+revoke all on public.kitchen_addresses from anon;
+grant select, insert, update on public.kitchen_addresses to authenticated;
+
+drop policy if exists "Cooks can read their own kitchen address" on public.kitchen_addresses;
+create policy "Cooks can read their own kitchen address"
+  on public.kitchen_addresses for select
+  using (auth.uid() = kitchen_id);
+
+drop policy if exists "Cooks can insert their own kitchen address" on public.kitchen_addresses;
+create policy "Cooks can insert their own kitchen address"
+  on public.kitchen_addresses for insert
+  with check (auth.uid() = kitchen_id);
+
+drop policy if exists "Cooks can update their own kitchen address" on public.kitchen_addresses;
+create policy "Cooks can update their own kitchen address"
+  on public.kitchen_addresses for update
+  using (auth.uid() = kitchen_id);
+
+drop policy if exists "Admins can read every kitchen address" on public.kitchen_addresses;
+create policy "Admins can read every kitchen address"
+  on public.kitchen_addresses for select
+  using (public.user_has_role('admin'));
+
+-- Reuses section 8's function: its body only sets new.updated_at.
+drop trigger if exists before_kitchen_address_update on public.kitchen_addresses;
+create trigger before_kitchen_address_update
+  before update on public.kitchen_addresses
+  for each row execute function public.touch_kitchen_updated_at();
+
+do $$
+begin
+  -- Earlier draft: public kitchens.business_address.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'kitchens' and column_name = 'business_address'
+  ) then
+    execute $sql$
+      insert into public.kitchen_addresses as ka (kitchen_id, business_address)
+      select id, nullif(btrim(business_address), '') from public.kitchens
+      where nullif(btrim(business_address), '') is not null
+      on conflict (kitchen_id) do update
+        set business_address = coalesce(ka.business_address, excluded.business_address)
+    $sql$;
+    alter table public.kitchens drop column business_address;
+  end if;
+
+  -- Earlier draft: public kitchens.postal_code (its CHECK goes with it).
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'kitchens' and column_name = 'postal_code'
+  ) then
+    execute $sql$
+      insert into public.kitchen_addresses as ka (kitchen_id, postal_code)
+      select id, postal_code from public.kitchens
+      where postal_code is not null
+      on conflict (kitchen_id) do update
+        set postal_code = coalesce(ka.postal_code, excluded.postal_code)
+    $sql$;
+    alter table public.kitchens drop column postal_code;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'kitchens' and column_name = 'neighbourhood'
+  ) then
+    alter table public.kitchens alter column neighbourhood drop not null;
+  end if;
+end;
+$$;
+
+-- Section 19's exact coordinates, before section 29 rounds the public copy.
+insert into public.kitchen_addresses as ka (kitchen_id, latitude, longitude)
+select id, latitude, longitude from public.kitchens
+where latitude is not null and longitude is not null
+on conflict (kitchen_id) do update
+  set latitude = excluded.latitude, longitude = excluded.longitude
+  where ka.latitude is null or ka.longitude is null;
+
+-- ----------------------------------------------------------------------------
+-- 29. PUBLIC, COARSE LOCATION ON KITCHENS (derived, never client-written)
+-- What anyone browsing sees:
+--   * kitchens.postal_sector — the first 2 digits of the postal code (the
+--     Customer app shows "Postal sector 31")
+--   * kitchens.latitude/longitude — rounded to 3 decimal places. At
+--     Singapore's latitude that's a ~110 m grid, i.e. the true spot is within
+--     ~55 m (lat) / ~55 m (long) of the published point — fine for distance
+--     sorting, useless for finding a front door.
+-- Same approach as section 27's business_uen: a BEFORE INSERT/UPDATE trigger
+-- on kitchens always overwrites these three from kitchen_addresses, so
+-- whatever a client sends for them is ignored (a cook can't publish exact
+-- coordinates even by accident, and an old app build that still writes
+-- kitchens.latitude gets rounded). An AFTER trigger on kitchen_addresses
+-- makes the kitchens row recompute whenever the private values change.
+-- Both SECURITY DEFINER so they work regardless of who is writing (the
+-- recompute updates the kitchens row the cook's address belongs to).
+-- No new GRANT/RLS: postal_sector is covered by the table-level kitchens
+-- grants and "Anyone can read live kitchens", same as section 19.
+-- ----------------------------------------------------------------------------
+alter table public.kitchens add column if not exists postal_sector text;
+alter table public.kitchens drop constraint if exists kitchens_postal_sector_check;
+alter table public.kitchens add constraint kitchens_postal_sector_check
+  check (postal_sector ~ '^[0-9]{2}$');
+
+create or replace function public.set_kitchen_public_location()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  loc record;
+begin
+  -- No kitchen_addresses row yet -> every field of loc is NULL.
+  select latitude, longitude, postal_code into loc
+  from public.kitchen_addresses
+  where kitchen_id = new.id;
+
+  new.latitude := round(loc.latitude, 3);
+  new.longitude := round(loc.longitude, 3);
+  new.postal_sector := left(loc.postal_code, 2);
+  return new;
+end;
+$$;
+
+drop trigger if exists before_kitchen_public_location on public.kitchens;
+create trigger before_kitchen_public_location
+  before insert or update on public.kitchens
+  for each row execute function public.set_kitchen_public_location();
+
+create or replace function public.sync_kitchen_public_location()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- The kitchens trigger above recomputes the values; this just makes it run.
+  update public.kitchens set postal_sector = null where id = new.kitchen_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists after_kitchen_address_change on public.kitchen_addresses;
+create trigger after_kitchen_address_change
+  after insert or update of postal_code, latitude, longitude on public.kitchen_addresses
+  for each row execute function public.sync_kitchen_public_location();
+
+-- Recompute every kitchen once, replacing section 19's exact coordinates with
+-- rounded ones. Only rows whose public values would change, so the rest keep
+-- their updated_at.
+update public.kitchens k
+set postal_sector = null
+from (
+  select k2.id,
+         round(ka.latitude, 3) as lat,
+         round(ka.longitude, 3) as lng,
+         left(ka.postal_code, 2) as sector
+  from public.kitchens k2
+  left join public.kitchen_addresses ka on ka.kitchen_id = k2.id
+) d
+where d.id = k.id
+  and (d.lat is distinct from k.latitude
+       or d.lng is distinct from k.longitude
+       or d.sector is distinct from k.postal_sector);
+
+-- ----------------------------------------------------------------------------
+-- 30. REVEALING THE EXACT LOCATION TO THE ASSIGNED RIDER / PICKER
+-- Two SECURITY DEFINER functions, the only way anyone other than the cook or
+-- an admin can read a kitchen_addresses row. Same pattern as section 24's
+-- get_order_rider(): each takes one request id, checks the caller is the
+-- person assigned to it right now, and returns one row of
+-- (business_address, postal_code, latitude, longitude) — or no row at all,
+-- so a caller can't tell "not yours" from "nothing saved".
+--
+-- get_delivery_kitchen_location(delivery_request_id): the caller is that
+-- delivery's rider AND it's 'accepted'. Open (nobody assigned yet),
+-- release_requested (the rider is backing out), completed and cancelled all
+-- return nothing, so access ends when the job does.
+--
+-- get_pickup_kitchen_location(pickup_request_id): the caller is that
+-- pickup's picker AND it's 'accepted' AND the rider who requested the pickup
+-- currently holds an accepted delivery at the same kitchen. pickup_requests
+-- aren't linked to a delivery (see section 11), so without that last check a
+-- rider could open a pickup request at any live kitchen and have a picker
+-- friend accept it just to read the location. The requesting rider doesn't
+-- need a pickup path of their own: they read it through their delivery.
+--
+-- Deliberately NOT copied into notifications/push payloads: those rows
+-- persist after the job ends (and push text can sit on a lock screen),
+-- whereas these functions stop answering the moment the request moves on.
+--
+-- An earlier draft had address-only versions under other names
+-- (get_*_kitchen_address); they're dropped so nothing keeps a second path.
+-- Execute is revoked from PUBLIC *and* anon/authenticated first (Supabase
+-- grants those directly on new functions — same note as get_order_rider),
+-- then granted back to authenticated only.
+-- ----------------------------------------------------------------------------
+drop function if exists public.get_delivery_kitchen_address(uuid);
+drop function if exists public.get_pickup_kitchen_address(uuid);
+
+create or replace function public.get_delivery_kitchen_location(p_delivery_request_id uuid)
+returns table (business_address text, postal_code text, latitude numeric, longitude numeric)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select ka.business_address, ka.postal_code, ka.latitude, ka.longitude
+  from public.delivery_requests d
+  join public.kitchen_addresses ka on ka.kitchen_id = d.kitchen_id
+  where d.id = p_delivery_request_id
+    and d.rider_id = auth.uid()
+    and d.status = 'accepted';
+$$;
+
+revoke all on function public.get_delivery_kitchen_location(uuid) from public, anon, authenticated;
+grant execute on function public.get_delivery_kitchen_location(uuid) to authenticated;
+
+create or replace function public.get_pickup_kitchen_location(p_pickup_request_id uuid)
+returns table (business_address text, postal_code text, latitude numeric, longitude numeric)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select ka.business_address, ka.postal_code, ka.latitude, ka.longitude
+  from public.pickup_requests pr
+  join public.kitchen_addresses ka on ka.kitchen_id = pr.kitchen_id
+  where pr.id = p_pickup_request_id
+    and pr.picker_id = auth.uid()
+    and pr.status = 'accepted'
+    and exists (
+      select 1 from public.delivery_requests d
+      where d.kitchen_id = pr.kitchen_id
+        and d.rider_id = pr.rider_id
+        and d.status = 'accepted'
+    );
+$$;
+
+revoke all on function public.get_pickup_kitchen_location(uuid) from public, anon, authenticated;
+grant execute on function public.get_pickup_kitchen_location(uuid) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 31. NEW KITCHEN CATEGORIES
+-- The business type list is now exactly: Home Cook, Hawker, Bakery,
+-- Vegetarian, Drinks & Desserts. Same drop-and-recreate as section 9 (a check
+-- constraint can't be edited in place; `kitchens_category_check` is the name
+-- Postgres auto-generated for section 6's inline check). Existing rows are
+-- remapped BETWEEN the drop and the re-add so the new constraint can't fail:
+--   * 'drinks'      -> 'drinks-desserts' (same category; its label was
+--                      already "Desserts & Drinks")
+--   * 'bulk-orders' -> 'home-cook' (no direct equivalent; bulk/catering
+--                      orders come overwhelmingly from home cooks, and the
+--                      cook can re-pick in KitchenSetupForm)
+--   * anything else outside the new list also -> 'home-cook', as a safety net.
+-- cook_applications.business_type is free text holding the display LABEL
+-- (check_cook_application_uen() in section 26 compares it to 'Home Cook'), so
+-- it has no constraint to change; older applications keep their old label.
+-- ----------------------------------------------------------------------------
+alter table public.kitchens drop constraint if exists kitchens_category_check;
+
+update public.kitchens set category = 'drinks-desserts' where category = 'drinks';
+update public.kitchens set category = 'home-cook'
+where category not in ('home-cook', 'hawker', 'bakery', 'vegetarian', 'drinks-desserts');
+
+alter table public.kitchens add constraint kitchens_category_check
+  check (category in ('home-cook', 'hawker', 'bakery', 'vegetarian', 'drinks-desserts'));
+
+-- ----------------------------------------------------------------------------
+-- 32. HALAL FLAG ON KITCHENS (customer-facing)
+-- A plain yes/no the cook ticks in KitchenSetupForm, independent of
+-- cuisine_type (a Western or Indian kitchen can be halal too). Backfilled to
+-- true for kitchens whose cuisine_type is already 'halal'.
+--
+-- Readable by the Customer app with no column-level grant, same as every
+-- other public kitchen field: the "Anyone can read live kitchens" policy has
+-- no column list. That policy has always been meant for signed-out customers
+-- too, but this file only ever granted kitchens to `authenticated` — anon
+-- reads have been relying on Supabase's implicit default privileges (see the
+-- note at the top of this file). The explicit `grant select ... to anon`
+-- below makes that dependency real rather than implicit; it's a no-op on a
+-- project where anon already has it. RLS still limits anon to live kitchens,
+-- and nothing precise is on kitchens any more (sections 28–29).
+-- ----------------------------------------------------------------------------
+alter table public.kitchens add column if not exists is_halal boolean not null default false;
+
+update public.kitchens set is_halal = true where cuisine_type = 'halal' and not is_halal;
+
+grant select on public.kitchens to anon;
+
+-- ----------------------------------------------------------------------------
+-- 33. PARTNER TERMS ACKNOWLEDGEMENT ON KITCHENS
+-- Before a kitchen can go live the cook must tick: "I acknowledge that Kopi
+-- Boy only connects customers with cooks. I am responsible for food safety,
+-- hygiene, pricing, and fulfilling orders I accept. Kopi Boy does not process
+-- payments or guarantee income." Stored on kitchens rather than
+-- cook_applications because KitchenSetupForm is the step that actually puts a
+-- cook in front of customers, and because cooks already approved (who will
+-- never fill in an application again) can be asked for it on their next save.
+--
+-- The client only signals "ticked" by sending any non-null value; this
+-- BEFORE INSERT/UPDATE trigger decides the stored timestamp:
+--   * already acknowledged -> the original timestamp is kept, always (a cook
+--     can neither clear it nor move it)
+--   * first acknowledgement -> stamped with the server's now(), never the
+--     client's clock
+--   * INSERT without it -> rejected (a new kitchen can't exist unacknowledged)
+-- UPDATEs of older, unacknowledged kitchens without it are allowed, so
+-- server-side paths like section 27's business_uen sync and section 29's
+-- location sync keep working; KitchenSetupForm won't save such a kitchen
+-- until the box is ticked. Supabase's upsert (INSERT ... ON CONFLICT DO
+-- UPDATE) fires the INSERT trigger first and then the UPDATE one, which
+-- restores the original.
+-- ----------------------------------------------------------------------------
+alter table public.kitchens add column if not exists acknowledged_terms_at timestamptz;
+
+create or replace function public.stamp_kitchen_terms_acknowledgement()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if tg_op = 'UPDATE' and old.acknowledged_terms_at is not null then
+    new.acknowledged_terms_at := old.acknowledged_terms_at;
+  elsif new.acknowledged_terms_at is not null then
+    new.acknowledged_terms_at := now();
+  elsif tg_op = 'INSERT' then
+    raise exception 'Please acknowledge the Kopi Boy partner terms before setting up your kitchen.' using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists before_kitchen_terms_acknowledgement on public.kitchens;
+create trigger before_kitchen_terms_acknowledgement
+  before insert or update on public.kitchens
+  for each row execute function public.stamp_kitchen_terms_acknowledgement();
+
+-- ----------------------------------------------------------------------------
+-- 34. DROP kitchens.neighbourhood — ON HOLD, DO NOT UNCOMMENT YET
+-- Uncomment and run only once BOTH are true:
+--   1. The Customer app (and Boss app, if it reads kitchens) no longer
+--      selects kitchens.neighbourhood — a select naming a missing column
+--      fails the whole query, not just that field.
+--   2. docs/supabase-notifications.sql has been re-run, so
+--      notify_on_delivery_change() / notify_on_pickup_change() read
+--      postal_sector instead. Their old versions select neighbourhood inside
+--      an exception handler, so they wouldn't break orders — they'd silently
+--      stop sending delivery/pickup notifications.
+-- ----------------------------------------------------------------------------
+-- alter table public.kitchens drop column if exists neighbourhood;

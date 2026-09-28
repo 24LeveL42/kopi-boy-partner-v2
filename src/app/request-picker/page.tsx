@@ -5,6 +5,7 @@ import { TopBar } from "@/components/TopBar";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import type { Profile } from "@/lib/types-auth";
 import type { PickupRequestWithKitchen } from "@/lib/types-picker";
+import { publicKitchenArea } from "@/lib/kitchen-profile";
 
 interface RawRow {
   id: string;
@@ -16,7 +17,7 @@ interface RawRow {
   created_at: string;
   accepted_at: string | null;
   completed_at: string | null;
-  kitchens: { business_name: string; neighbourhood: string } | null;
+  kitchens: { business_name: string; postal_sector: string | null } | null;
 }
 
 export default async function RequestPickerPage() {
@@ -36,10 +37,10 @@ export default async function RequestPickerPage() {
   if (!profile || profile.role !== "rider") redirect("/");
 
   const [{ data: kitchens }, { data: requests }] = await Promise.all([
-    supabase.from("kitchens").select("id, business_name, neighbourhood").eq("is_live", true),
+    supabase.from("kitchens").select("id, business_name, postal_sector").eq("is_live", true),
     supabase
       .from("pickup_requests")
-      .select("*, kitchens(business_name, neighbourhood)")
+      .select("*, kitchens(business_name, postal_sector)")
       .eq("rider_id", user.id)
       .order("created_at", { ascending: false })
       .returns<RawRow[]>(),
@@ -56,7 +57,8 @@ export default async function RequestPickerPage() {
     accepted_at: r.accepted_at,
     completed_at: r.completed_at,
     kitchen_business_name: r.kitchens?.business_name ?? "Unknown kitchen",
-    kitchen_neighbourhood: r.kitchens?.neighbourhood ?? "",
+    kitchen_address: publicKitchenArea(r.kitchens?.postal_sector),
+    kitchen_maps_url: null,
   }));
 
   return (

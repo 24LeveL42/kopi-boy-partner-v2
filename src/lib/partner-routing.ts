@@ -1,5 +1,6 @@
 import type { Profile, CookApplication, RiderApplication, PickerApplication } from "./types-auth";
-import type { Kitchen } from "./types-kitchen";
+import type { Kitchen, MerchantCategory } from "./types-kitchen";
+import { categoryForBusinessType } from "./kitchen-profile";
 
 /**
  * Everything the signed-in home route (`/`) needs to decide which screen to
@@ -14,12 +15,23 @@ export interface PartnerRoutingInput {
   kitchen: Kitchen | null;
 }
 
+/** What first-time Kitchen Setup is pre-filled with, taken from the cook application. */
+export interface KitchenDefaults {
+  business_name: string;
+  category: MerchantCategory;
+  business_address: string;
+  postal_code: string;
+  latitude: number | null;
+  longitude: number | null;
+  description: string;
+}
+
 export type PartnerScreen =
   | { kind: "blocked" }
   | { kind: "apply" }
   | { kind: "application-pending" }
   | { kind: "application-rejected" }
-  | { kind: "kitchen-setup"; defaults: { business_name: string; neighbourhood: string; description: string } }
+  | { kind: "kitchen-setup"; defaults: KitchenDefaults }
   | { kind: "partner-shell"; view: "cook" | "rider" }
   | { kind: "picker-shell" };
 
@@ -28,7 +40,11 @@ function kitchenSetupFor(app: CookApplication): PartnerScreen {
     kind: "kitchen-setup",
     defaults: {
       business_name: app.business_name,
-      neighbourhood: app.neighbourhood ?? "",
+      category: categoryForBusinessType(app.business_type),
+      business_address: app.business_address ?? "",
+      postal_code: app.postal_code ?? "",
+      latitude: null,
+      longitude: null,
       description: app.description ?? "",
     },
   };

@@ -315,7 +315,7 @@ declare
   v_broadcast boolean;
 begin
   begin
-    select business_name, neighbourhood into k from public.kitchens where id = new.kitchen_id;
+    select business_name, postal_sector into k from public.kitchens where id = new.kitchen_id;
 
     -- Open (new, or re-opened): broadcast to every active rider who's on duty.
     -- (nested ifs, not `tg_op = 'INSERT' or old...`: OLD isn't assigned on INSERT
@@ -329,7 +329,7 @@ begin
     if v_broadcast then
       insert into public.notifications (user_id, category, type, title, body, url, ref_id)
       select p.id, 'deliveries', 'delivery_open', 'New delivery request',
-             coalesce(k.business_name, 'A kitchen') || coalesce(' · ' || nullif(k.neighbourhood, ''), ''),
+             coalesce(k.business_name, 'A kitchen') || coalesce(' · Postal sector ' || k.postal_sector, ''),
              '/', new.id
       from public.profiles p
       left join public.notification_preferences np on np.user_id = p.id
@@ -391,7 +391,7 @@ declare
   v_broadcast boolean;
 begin
   begin
-    select business_name, neighbourhood into k from public.kitchens where id = new.kitchen_id;
+    select business_name, postal_sector into k from public.kitchens where id = new.kitchen_id;
     v_kitchen := coalesce(k.business_name, 'the kitchen');
 
     if tg_op = 'INSERT' then
@@ -403,7 +403,7 @@ begin
     if v_broadcast then
       insert into public.notifications (user_id, category, type, title, body, url, ref_id)
       select p.id, 'pickups', 'pickup_open', 'New pickup request',
-             v_kitchen || coalesce(' · ' || nullif(k.neighbourhood, ''), '')
+             v_kitchen || coalesce(' · Postal sector ' || k.postal_sector, '')
                || ' · suggested $' || to_char(new.suggested_fee, 'FM990.00'),
              '/', new.id
       from public.profiles p

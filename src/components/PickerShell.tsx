@@ -10,6 +10,7 @@ import { PendingLabel } from "./Pending";
 import { SkeletonCards } from "./Skeleton";
 import { ProfileSummaryCard, type ProfileSummary } from "./ProfileSummaryCard";
 import type { PickupRequestWithKitchen } from "@/lib/types-picker";
+import { formatKitchenAddress, kitchenMapsUrl, publicKitchenArea, type KitchenLocation } from "@/lib/kitchen-profile";
 
 interface RawRow {
   id: string;
@@ -21,10 +22,11 @@ interface RawRow {
   created_at: string;
   accepted_at: string | null;
   completed_at: string | null;
-  kitchens: { business_name: string; neighbourhood: string } | null;
+  kitchens: { business_name: string; postal_sector: string | null } | null;
 }
 
-function toRow(r: RawRow): PickupRequestWithKitchen {
+// location is only ever passed for the picker's own accepted pickup.
+function toRow(r: RawRow, location?: KitchenLocation | null): PickupRequestWithKitchen {
   return {
     id: r.id,
     rider_id: r.rider_id,
@@ -36,7 +38,8 @@ function toRow(r: RawRow): PickupRequestWithKitchen {
     accepted_at: r.accepted_at,
     completed_at: r.completed_at,
     kitchen_business_name: r.kitchens?.business_name ?? "Unknown kitchen",
-    kitchen_neighbourhood: r.kitchens?.neighbourhood ?? "",
+    kitchen_address: (location && formatKitchenAddress(location)) || publicKitchenArea(r.kitchens?.postal_sector),
+    kitchen_maps_url: location ? kitchenMapsUrl(location) : null,
   };
 }
 
@@ -54,13 +57,20 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
 
     const { data: mine } = await supabase
       .from("pickup_requests")
-      .select("*, kitchens(business_name, neighbourhood)")
+      .select("*, kitchens(business_name, postal_sector)")
       .eq("picker_id", userId)
       .eq("status", "accepted")
       .maybeSingle<RawRow>();
 
     if (mine) {
-      setMyPickup(toRow(mine));
+      // The exact address/postal code/coordinates are private; the DB hands
+      // them over only while this picker holds the accepted pickup and its
+      // rider holds an accepted delivery at that kitchen (schema section 30).
+      // Otherwise the card shows the postal sector.
+      const { data: location } = await supabase
+        .rpc("get_pickup_kitchen_location", { p_pickup_request_id: mine.id })
+        .maybeSingle<KitchenLocation>();
+      setMyPickup(toRow(mine, location));
       setOpenRequests([]);
       setLoading(false);
       return;
@@ -70,12 +80,12 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
 
     const { data: open } = await supabase
       .from("pickup_requests")
-      .select("*, kitchens(business_name, neighbourhood)")
+      .select("*, kitchens(business_name, postal_sector)")
       .eq("status", "open")
       .order("created_at", { ascending: true })
       .returns<RawRow[]>();
 
-    setOpenRequests((open ?? []).map(toRow));
+    setOpenRequests((open ?? []).map((r) => toRow(r)));
     setLoading(false);
   }, [supabase, userId]);
 
@@ -147,7 +157,18 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
             Your active pickup
           </p>
           <p className="mt-1 text-sm font-semibold">{myPickup.kitchen_business_name}</p>
-          <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{myPickup.kitchen_neighbourhood}</p>
+          <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{myPickup.kitchen_address}</p>
+          {myPickup.kitchen_maps_url && (
+            <a
+              href={myPickup.kitchen_maps_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold"
+              style={{ color: "var(--kb-purple)" }}
+            >
+              Open in Google Maps
+            </a>
+          )}
           <p className="mt-2 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
             Collect from the cook, meet the rider nearby, and get paid directly by the rider (suggested ${myPickup.suggested_fee.toFixed(2)}).
           </p>
@@ -181,7 +202,7 @@ export function PickerShell({ userId, profile }: { userId: string; profile?: Pro
               {openRequests.map((r) => (
                 <div key={r.id} className="rounded-2xl bg-white p-4" style={{ color: "var(--kb-ink)" }}>
                   <p className="text-sm font-semibold">{r.kitchen_business_name}</p>
-                  <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{r.kitchen_neighbourhood}</p>
+                  <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{r.kitchen_address}</p>
                   <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
                     Suggested ${r.suggested_fee.toFixed(2)} — paid directly by the rider
                   </p>

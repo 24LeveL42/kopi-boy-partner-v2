@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePendingAction } from "@/lib/use-pending-action";
 import { PartnerRole } from "@/lib/types";
 import { businessUenProblem, normalizeBusinessUen, requiresBusinessUen } from "@/lib/business-uen";
+import { MERCHANT_CATEGORIES, isValidPostalCode } from "@/lib/kitchen-profile";
 import { useBackHandler } from "./AppChrome";
 import { Logo } from "./Logo";
 import { PendingLabel } from "./Pending";
@@ -26,7 +27,8 @@ export function ApplyForm({ userId }: { userId: string }) {
   // Cook fields
   const [businessName, setBusinessName] = useState("");
   const [businessType, setBusinessType] = useState("Home Cook");
-  const [neighbourhood, setNeighbourhood] = useState("");
+  const [businessAddress, setBusinessAddress] = useState("");
+  const [postalCode, setPostalCode] = useState("");
   const [description, setDescription] = useState("");
   const [paynowUen, setPaynowUen] = useState("");
   const [businessUen, setBusinessUen] = useState("");
@@ -55,6 +57,14 @@ export function ApplyForm({ userId }: { userId: string }) {
     }
 
     if (roleChoice === "cook") {
+      if (!businessAddress.trim()) {
+        setError("Please enter your business address.");
+        return;
+      }
+      if (!isValidPostalCode(postalCode)) {
+        setError("Postal code must be 6 digits (e.g. 310123).");
+        return;
+      }
       const uenProblem = businessUenProblem(businessType, businessUen);
       if (uenProblem) {
         setError(uenProblem);
@@ -84,7 +94,8 @@ export function ApplyForm({ userId }: { userId: string }) {
           user_id: userId,
           business_name: businessName,
           business_type: businessType,
-          neighbourhood,
+          business_address: businessAddress.trim(),
+          postal_code: postalCode.trim(),
           description,
           paynow_uen: paynowUen,
           // Home cooks don't register a business, so they never send one (the
@@ -143,7 +154,7 @@ export function ApplyForm({ userId }: { userId: string }) {
             className="w-full rounded-2xl bg-white py-4 text-left px-5"
           >
             <span className="block font-semibold" style={{ color: "var(--kb-ink)" }}>I&apos;m a cook</span>
-            <span className="text-sm" style={{ color: "var(--kb-ink-soft)" }}>Home cook, hawker, bakery, or small food business</span>
+            <span className="text-sm" style={{ color: "var(--kb-ink-soft)" }}>Home cook, hawker, bakery, vegetarian, or drinks & desserts</span>
           </button>
           <button
             onClick={() => setRoleChoice("rider")}
@@ -224,10 +235,9 @@ export function ApplyForm({ userId }: { userId: string }) {
             </Field>
             <Field label="Business type">
               <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} className="kb-input">
-                <option>Home Cook</option>
-                <option>Hawker</option>
-                <option>Bakery</option>
-                <option>Small Business</option>
+                {MERCHANT_CATEGORIES.map((c) => (
+                  <option key={c.id}>{c.label}</option>
+                ))}
               </select>
             </Field>
             {requiresBusinessUen(businessType) && (
@@ -243,8 +253,28 @@ export function ApplyForm({ userId }: { userId: string }) {
                 />
               </Field>
             )}
-            <Field label="Neighbourhood">
-              <input required value={neighbourhood} onChange={(e) => setNeighbourhood(e.target.value)} className="kb-input" placeholder="e.g. Toa Payoh" />
+            <Field label="Business Address">
+              <input
+                required
+                value={businessAddress}
+                onChange={(e) => setBusinessAddress(e.target.value)}
+                className="kb-input"
+                placeholder="e.g. Blk 123 Toa Payoh Lor 1, #01-23"
+                autoComplete="street-address"
+              />
+            </Field>
+            <Field label="Postal Code">
+              <input
+                required
+                value={postalCode}
+                onChange={(e) => setPostalCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="kb-input"
+                placeholder="e.g. 310123"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                title="6-digit Singapore postal code"
+                autoComplete="postal-code"
+              />
             </Field>
             <Field label="Tell customers about your food">
               <textarea value={description} onChange={(e) => setDescription(e.target.value)} className="kb-input" rows={3} />

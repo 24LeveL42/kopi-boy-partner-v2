@@ -9,6 +9,7 @@ import { OrderChat } from "@/components/OrderChat";
 import { PendingLabel } from "@/components/Pending";
 import { SkeletonCards } from "@/components/Skeleton";
 import { ORDER_CHAT_PHOTO_TYPES, uploadOrderChatPhoto, validateOrderChatPhoto } from "@/lib/order-chat-photo";
+import { formatKitchenAddress, kitchenMapsUrl, publicKitchenArea, type KitchenLocation } from "@/lib/kitchen-profile";
 
 interface RawRow {
   id: string;
@@ -19,14 +20,15 @@ interface RawRow {
   created_at: string;
   accepted_at: string | null;
   completed_at: string | null;
-  kitchens: { business_name: string; neighbourhood: string } | null;
+  kitchens: { business_name: string; postal_sector: string | null } | null;
 }
 
 function shortId(id: string) {
   return id.slice(0, 8).toUpperCase();
 }
 
-function toRow(r: RawRow): DeliveryRequestWithKitchen {
+// location is only ever passed for the rider's own accepted delivery.
+function toRow(r: RawRow, location?: KitchenLocation | null): DeliveryRequestWithKitchen {
   return {
     id: r.id,
     order_id: r.order_id,
@@ -37,7 +39,8 @@ function toRow(r: RawRow): DeliveryRequestWithKitchen {
     accepted_at: r.accepted_at,
     completed_at: r.completed_at,
     kitchen_business_name: r.kitchens?.business_name ?? "Unknown kitchen",
-    kitchen_neighbourhood: r.kitchens?.neighbourhood ?? "",
+    kitchen_address: (location && formatKitchenAddress(location)) || publicKitchenArea(r.kitchens?.postal_sector),
+    kitchen_maps_url: location ? kitchenMapsUrl(location) : null,
   };
 }
 
@@ -64,7 +67,7 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
 
     const { data: mine, error: mineError } = await supabase
       .from("delivery_requests")
-      .select("*, kitchens(business_name, neighbourhood)")
+      .select("*, kitchens(business_name, postal_sector)")
       .eq("rider_id", riderId)
       .eq("status", "accepted")
       .maybeSingle<RawRow>();
@@ -76,7 +79,13 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
     }
 
     if (mine) {
-      setMyDelivery(toRow(mine));
+      // The exact address/postal code/coordinates are private; the DB hands
+      // them over only while this rider holds the accepted delivery (schema
+      // section 30). If that call fails, the card shows the postal sector.
+      const { data: location } = await supabase
+        .rpc("get_delivery_kitchen_location", { p_delivery_request_id: mine.id })
+        .maybeSingle<KitchenLocation>();
+      setMyDelivery(toRow(mine, location));
       setOpenRequests([]);
       setLoading(false);
       return;
@@ -86,7 +95,7 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
 
     const { data: open, error: openError } = await supabase
       .from("delivery_requests")
-      .select("*, kitchens(business_name, neighbourhood)")
+      .select("*, kitchens(business_name, postal_sector)")
       .eq("status", "open")
       .order("created_at", { ascending: true })
       .returns<RawRow[]>();
@@ -97,7 +106,7 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
       return;
     }
 
-    setOpenRequests((open ?? []).map(toRow));
+    setOpenRequests((open ?? []).map((r) => toRow(r)));
     setLoading(false);
   }, [supabase, riderId]);
 
@@ -210,7 +219,18 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
             Your active delivery
           </p>
           <p className="mt-1 text-sm font-semibold">{myDelivery.kitchen_business_name}</p>
-          <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{myDelivery.kitchen_neighbourhood}</p>
+          <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{myDelivery.kitchen_address}</p>
+          {myDelivery.kitchen_maps_url && (
+            <a
+              href={myDelivery.kitchen_maps_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold"
+              style={{ color: "var(--kb-purple)" }}
+            >
+              Open in Google Maps
+            </a>
+          )}
           <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>Order #{shortId(myDelivery.order_id)}</p>
           <p className="mt-2 text-xs" style={{ color: "var(--kb-ink-soft)" }}>
             Collect from the cook and agree the delivery fee directly with them.
@@ -308,7 +328,7 @@ export function RiderDeliveriesPanel({ riderId }: { riderId: string }) {
               {openRequests.map((r) => (
                 <div key={r.id} className="rounded-2xl bg-white p-4" style={{ color: "var(--kb-ink)" }}>
                   <p className="text-sm font-semibold">{r.kitchen_business_name}</p>
-                  <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{r.kitchen_neighbourhood}</p>
+                  <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{r.kitchen_address}</p>
                   <p className="mt-1 text-xs" style={{ color: "var(--kb-ink-soft)" }}>Order #{shortId(r.order_id)}</p>
                   <button
                     onClick={() => accept(r.id)}

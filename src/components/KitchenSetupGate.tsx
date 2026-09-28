@@ -4,6 +4,7 @@ import { useState } from "react";
 import { KitchenSetupForm } from "./KitchenSetupForm";
 import { StatusScreen } from "./StatusScreen";
 import { useBackHandler } from "./AppChrome";
+import type { KitchenDefaults } from "@/lib/partner-routing";
 
 /**
  * First-time Kitchen Setup renders at "/" itself, so Cancel has no other page
@@ -16,7 +17,7 @@ export function KitchenSetupGate({
   defaults,
 }: {
   userId: string;
-  defaults: { business_name: string; neighbourhood: string; description: string };
+  defaults: KitchenDefaults;
 }) {
   const [paused, setPaused] = useState(false);
   useBackHandler(paused ? () => setPaused(false) : null);

@@ -11,7 +11,7 @@ import { PickupChat } from "./PickupChat";
 interface KitchenOption {
   id: string;
   business_name: string;
-  neighbourhood: string;
+  postal_sector: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -64,7 +64,7 @@ export function RequestPickerForm({
           {openOrActive.map((r) => (
             <div key={r.id} className="rounded-2xl bg-white p-4" style={{ color: "var(--kb-ink)" }}>
               <p className="text-sm font-semibold">{r.kitchen_business_name}</p>
-              <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{r.kitchen_neighbourhood}</p>
+              <p className="text-xs" style={{ color: "var(--kb-ink-soft)" }}>{r.kitchen_address}</p>
               <p className="mt-2 text-xs font-medium" style={{ color: r.status === "accepted" ? "var(--kb-green-deep)" : "var(--kb-warn)" }}>
                 {STATUS_LABEL[r.status]}
               </p>
@@ -93,7 +93,8 @@ export function RequestPickerForm({
           >
             {kitchens.map((k) => (
               <option key={k.id} value={k.id}>
-                {k.business_name} — {k.neighbourhood}
+                {k.business_name}
+                {k.postal_sector ? ` — Postal sector ${k.postal_sector}` : ""}
               </option>
             ))}
           </select>
