@@ -1610,3 +1610,89 @@ create trigger before_kitchen_terms_acknowledgement
 --      stop sending delivery/pickup notifications.
 -- ----------------------------------------------------------------------------
 -- alter table public.kitchens drop column if exists neighbourhood;
+
+-- ----------------------------------------------------------------------------
+-- 35. PROMOTE profiles.role WHEN AN APPLICATION IS APPROVED
+-- Section 4 says cooks/riders/pickers get their role "via an approved
+-- application", but nothing did it: approving only flipped the application's
+-- status. resolvePartnerScreen (src/lib/partner-routing.ts) already routes an
+-- approved-but-unpromoted cook into Kitchen Setup, where the kitchens upsert
+-- then failed "Cooks can insert their own kitchen" (it requires
+-- user_has_role('cook')) with "new row violates row-level security policy
+-- for table kitchens". Riders/pickers hit the same wall on their own
+-- role-gated policies.
+--
+-- An AFTER INSERT/UPDATE trigger on each application table sets the role
+-- when the row becomes 'approved'. Only a 'customer' is promoted: an admin
+-- is never demoted, and an existing partner of another kind keeps their
+-- current role (one role per profile; HQ changes it by hand if needed).
+-- SECURITY DEFINER so it works whoever approves.
+--
+-- protect_profile_privileges (section 5) reverted role changes unless the
+-- caller is an admin — including when there is no caller at all (SQL editor,
+-- service role), where auth.uid() is null, so an approval from those paths
+-- could never promote anyone. It now also lets those through: every
+-- signed-in or anon request carries a JWT, and anon has no UPDATE grant on
+-- profiles, so a null auth.uid() only ever means a trusted server context.
+-- ----------------------------------------------------------------------------
+create or replace function public.protect_profile_privileges()
+returns trigger as $$
+begin
+  if auth.uid() is not null and not public.user_has_role('admin') then
+    new.role := old.role;
+    new.is_active := old.is_active;
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create or replace function public.promote_approved_applicant()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- tg_argv[0] is the role this application grants: 'cook', 'rider' or 'picker'.
+  update public.profiles
+  set role = tg_argv[0]
+  where id = new.user_id and role = 'customer';
+  return new;
+end;
+$$;
+
+revoke all on function public.promote_approved_applicant() from public, anon, authenticated;
+
+drop trigger if exists after_cook_application_approved on public.cook_applications;
+create trigger after_cook_application_approved
+  after insert or update of status on public.cook_applications
+  for each row
+  when (new.status = 'approved')
+  execute function public.promote_approved_applicant('cook');
+
+drop trigger if exists after_rider_application_approved on public.rider_applications;
+create trigger after_rider_application_approved
+  after insert or update of status on public.rider_applications
+  for each row
+  when (new.status = 'approved')
+  execute function public.promote_approved_applicant('rider');
+
+drop trigger if exists after_picker_application_approved on public.picker_applications;
+create trigger after_picker_application_approved
+  after insert or update of status on public.picker_applications
+  for each row
+  when (new.status = 'approved')
+  execute function public.promote_approved_applicant('picker');
+
+-- Backfill: everyone already approved but still a customer. Cook first, then
+-- rider, then picker — the `role = 'customer'` guard means whichever matches
+-- first wins for someone approved as more than one kind.
+update public.profiles p set role = 'cook'
+where p.role = 'customer'
+  and exists (select 1 from public.cook_applications a where a.user_id = p.id and a.status = 'approved');
+update public.profiles p set role = 'rider'
+where p.role = 'customer'
+  and exists (select 1 from public.rider_applications a where a.user_id = p.id and a.status = 'approved');
+update public.profiles p set role = 'picker'
+where p.role = 'customer'
+  and exists (select 1 from public.picker_applications a where a.user_id = p.id and a.status = 'approved');
