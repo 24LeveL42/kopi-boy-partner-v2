@@ -204,12 +204,17 @@ create trigger on_auth_user_created
 -- without this trigger, that same policy would let a user set their own
 -- role to 'admin' or flip their own is_active flag. This trigger silently
 -- reverts those two columns to their previous value unless the person
--- making the change is already an admin.
+-- making the change is already an admin, or there is no caller at all
+-- (SQL editor, service role: auth.uid() is null). Every signed-in or anon
+-- request carries a JWT and anon has no UPDATE grant on profiles, so a null
+-- auth.uid() only ever means a trusted server context. Keep this function
+-- identical across the Partner, Customer and Boss schema files — they share
+-- one database, so re-running an older copy silently undoes the others.
 -- ----------------------------------------------------------------------------
 create or replace function public.protect_profile_privileges()
 returns trigger as $$
 begin
-  if not public.user_has_role('admin') then
+  if auth.uid() is not null and not public.user_has_role('admin') then
     new.role := old.role;
     new.is_active := old.is_active;
   end if;
